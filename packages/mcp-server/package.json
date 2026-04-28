@@ -1,0 +1,20 @@
+{
+  "name": "@obsidian-mcp/mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "obsidian-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.21.0",
+    "@obsidian-mcp/shared": "0.1.0",
+    "better-sqlite3": "^12.2.0",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {}
+}
+

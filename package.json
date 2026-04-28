@@ -1,0 +1,45 @@
+{
+  "name": "obsidian-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-only, exclusion-based local bridge for using an Obsidian vault through MCP clients (Claude Desktop, LM Studio).",
+  "license": "MIT",
+  "homepage": "https://github.com/allexcd/obsidian-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/allexcd/obsidian-mcp/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/allexcd/obsidian-mcp"
+  },
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
+    "clean": "node scripts/clean.mjs",
+    "build": "npm run build --workspace @obsidian-mcp/shared && npm run build --workspace @obsidian-mcp/mcp-server && npm run build --workspace @obsidian-mcp/plugin && node scripts/bundle-mcp-server.mjs && node scripts/bundle-plugin.mjs",
+    "plugin:bundle": "npm run build --workspace @obsidian-mcp/shared && npm run build --workspace @obsidian-mcp/mcp-server && npm run build --workspace @obsidian-mcp/plugin && node scripts/bundle-mcp-server.mjs && node scripts/bundle-plugin.mjs",
+    "plugin:package": "npm run plugin:bundle && node scripts/package-plugin.mjs",
+    "plugin:install": "npm run plugin:bundle && node scripts/install-plugin.mjs",
+    "lint": "eslint packages scripts",
+    "test": "vitest run",
+    "typecheck": "tsc -b packages/shared packages/mcp-server packages/plugin --pretty false",
+    "release": "node scripts/release.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.17.24",
+    "esbuild": "^0.25.1",
+    "eslint": "^9.18.0",
+    "globals": "^15.14.0",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^3.0.8"
+  }
+}

@@ -1,0 +1,484 @@
+.obsidian-mcp-settings {
+  --mcp-gap: var(--size-4-3);
+  --mcp-panel-radius: 8px;
+}
+
+.obsidian-mcp-header {
+  margin-bottom: var(--size-4-4);
+}
+
+.obsidian-mcp-header h2 {
+  margin-bottom: var(--size-2-2);
+}
+
+.obsidian-mcp-tabs {
+  align-items: center;
+  border-bottom: 1px solid var(--background-modifier-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+  margin: 0 0 var(--size-4-4);
+}
+
+.obsidian-mcp-tab {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  margin-bottom: -1px;
+  padding: var(--size-2-3) var(--size-4-2);
+}
+
+.obsidian-mcp-tab:hover {
+  color: var(--text-normal);
+}
+
+.obsidian-mcp-tab.is-active {
+  border-bottom-color: var(--interactive-accent);
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+
+.obsidian-mcp-muted {
+  color: var(--text-muted);
+}
+
+.obsidian-mcp-code {
+  font-family: var(--font-monospace);
+  user-select: all;
+}
+
+.obsidian-mcp-label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+}
+
+.obsidian-mcp-section {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mcp-panel-radius);
+  margin: var(--size-4-4) 0;
+  padding: var(--size-4-4);
+}
+
+.obsidian-mcp-section-nested {
+  border: 0;
+  margin: var(--size-4-3) 0 0;
+  padding: 0;
+}
+
+.obsidian-mcp-section-heading {
+  align-items: baseline;
+  display: flex;
+  gap: var(--size-4-3);
+  justify-content: space-between;
+  margin-bottom: var(--size-4-3);
+}
+
+.obsidian-mcp-section-heading h3,
+.obsidian-mcp-section-heading p,
+.obsidian-mcp-card-header h4,
+.obsidian-mcp-status-card p,
+.obsidian-mcp-scope-card p,
+.obsidian-mcp-action-copy strong,
+.obsidian-mcp-action-copy span {
+  margin: 0;
+}
+
+.obsidian-mcp-section-heading p {
+  max-width: 48rem;
+}
+
+.obsidian-mcp-setup-table {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mcp-panel-radius);
+  overflow: hidden;
+}
+
+.obsidian-mcp-setup-row {
+  align-items: start;
+  background: var(--background-secondary);
+  border-top: 1px solid var(--background-modifier-border);
+  display: grid;
+  gap: var(--size-3-2) var(--size-4-3);
+  grid-template-columns: 2rem minmax(0, 1fr) 7.25rem;
+  min-height: 76px;
+  padding: var(--size-4-3);
+}
+
+.obsidian-mcp-setup-row:first-child {
+  border-top: 0;
+}
+
+.obsidian-mcp-step-number {
+  align-items: center;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 50%;
+  color: var(--text-muted);
+  display: inline-flex;
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-bold);
+  height: 2rem;
+  justify-content: center;
+  margin-top: 2px;
+  width: 2rem;
+}
+
+.obsidian-mcp-setup-body {
+  min-width: 0;
+  text-align: left;
+}
+
+.obsidian-mcp-setup-body h4,
+.obsidian-mcp-setup-body p {
+  margin: 0;
+}
+
+.obsidian-mcp-setup-body h4 {
+  font-size: var(--font-ui-medium);
+  margin-bottom: 2px;
+}
+
+.obsidian-mcp-setup-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+  grid-column: 2 / -1;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.obsidian-mcp-setup-action-setting {
+  border: 0;
+  padding: 0;
+}
+
+.obsidian-mcp-setup-action-setting .setting-item-info {
+  display: none;
+}
+
+.obsidian-mcp-setup-action-setting .setting-item-control {
+  gap: var(--size-2-2);
+  padding: 0;
+}
+
+.obsidian-mcp-setup-action-setting button {
+  min-height: 32px;
+  white-space: nowrap;
+}
+
+.obsidian-mcp-status-grid,
+.obsidian-mcp-scope-grid,
+.obsidian-mcp-action-grid {
+  display: grid;
+  gap: var(--mcp-gap);
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.obsidian-mcp-status-card,
+.obsidian-mcp-scope-card,
+.obsidian-mcp-action {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mcp-panel-radius);
+  min-width: 0;
+  padding: var(--size-4-3);
+}
+
+.obsidian-mcp-status-card strong {
+  display: block;
+  font-size: var(--font-ui-medium);
+  margin: var(--size-2-2) 0;
+}
+
+.obsidian-mcp-card-header {
+  align-items: center;
+  display: flex;
+  gap: var(--size-2-2);
+  justify-content: space-between;
+}
+
+.obsidian-mcp-chip,
+.obsidian-mcp-removable-chip {
+  align-items: center;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: var(--font-ui-smaller);
+  justify-content: center;
+  line-height: 1.4;
+  max-width: 100%;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.obsidian-mcp-setup-row > .obsidian-mcp-chip {
+  min-height: 30px;
+  min-width: 0;
+  width: 100%;
+}
+
+.obsidian-mcp-chip-good {
+  background: var(--background-modifier-success);
+  color: var(--text-normal);
+}
+
+.obsidian-mcp-chip-warning {
+  background: var(--background-modifier-error);
+  color: var(--text-on-accent);
+}
+
+.obsidian-mcp-chip-neutral {
+  background: var(--background-primary);
+  color: var(--text-muted);
+}
+
+.obsidian-mcp-action {
+  align-items: center;
+  display: flex;
+  gap: var(--size-4-2);
+  justify-content: space-between;
+}
+
+.obsidian-mcp-action-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.obsidian-mcp-action-setting,
+.obsidian-mcp-inline-setting {
+  border: 0;
+  padding: 0;
+}
+
+.obsidian-mcp-action-setting .setting-item-info,
+.obsidian-mcp-inline-setting .setting-item-info {
+  display: none;
+}
+
+.obsidian-mcp-action-setting .setting-item-control,
+.obsidian-mcp-inline-setting .setting-item-control {
+  padding: 0;
+}
+
+.obsidian-mcp-count-row {
+  align-items: baseline;
+  display: flex;
+  gap: var(--size-2-2);
+  margin: var(--size-4-2) 0;
+}
+
+.obsidian-mcp-count {
+  color: var(--text-normal);
+  font-size: var(--font-ui-large);
+  font-weight: var(--font-bold);
+}
+
+.obsidian-mcp-inline-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+}
+
+.obsidian-mcp-compact-note {
+  margin: var(--size-4-3) 0 0;
+}
+
+.obsidian-mcp-path-block {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mcp-panel-radius);
+  display: grid;
+  gap: var(--size-2-2);
+  margin-bottom: var(--size-4-2);
+  padding: var(--size-4-3);
+}
+
+.obsidian-mcp-path-block code,
+.obsidian-mcp-runtime-row code,
+.obsidian-mcp-result-info code {
+  overflow-wrap: anywhere;
+}
+
+.obsidian-mcp-config-actions {
+  display: grid;
+  gap: var(--size-4-3);
+  grid-template-columns: 1fr;
+  margin-top: var(--size-4-2);
+}
+
+.obsidian-mcp-config-preview {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mcp-panel-radius);
+  padding: var(--size-4-2);
+}
+
+.obsidian-mcp-config-preview-header {
+  align-items: center;
+  display: flex;
+  gap: var(--size-4-2);
+  justify-content: space-between;
+  margin-bottom: var(--size-2-2);
+}
+
+.obsidian-mcp-config-preview-header h4 {
+  margin: 0;
+}
+
+.obsidian-mcp-config-preview pre {
+  background: var(--background-primary);
+  border-radius: 6px;
+  margin-bottom: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: var(--size-4-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.obsidian-mcp-runtime-status {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mcp-panel-radius);
+  margin: var(--size-4-2) 0;
+  padding: var(--size-4-3);
+}
+
+.obsidian-mcp-runtime-row {
+  margin: 2px 0;
+  word-break: break-word;
+}
+
+.obsidian-mcp-runtime-details {
+  border-top: 1px solid var(--background-modifier-border);
+  margin-top: var(--size-4-3);
+  padding-top: var(--size-4-3);
+}
+
+.obsidian-mcp-runtime-details summary,
+.obsidian-mcp-manual-edit summary {
+  cursor: pointer;
+  font-weight: var(--font-semibold);
+}
+
+.obsidian-mcp-modal .modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-3);
+}
+
+.obsidian-mcp-excluded-block h4,
+.obsidian-mcp-manager-results h4 {
+  margin: 0 0 var(--size-2-2);
+}
+
+.obsidian-mcp-chip-list {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+}
+
+.obsidian-mcp-removable-chip {
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.obsidian-mcp-removable-chip:hover {
+  border-color: var(--interactive-accent);
+}
+
+.obsidian-mcp-manager-search {
+  align-items: center;
+  display: grid;
+  gap: var(--size-2-2);
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.obsidian-mcp-search-input {
+  width: 100%;
+}
+
+.obsidian-mcp-manager-results {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mcp-panel-radius);
+  max-height: min(45vh, 420px);
+  overflow: auto;
+  padding: var(--size-4-2);
+}
+
+.obsidian-mcp-result-row {
+  align-items: center;
+  border-top: 1px solid var(--background-modifier-border);
+  display: grid;
+  gap: var(--size-4-2);
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: var(--size-2-3) 0;
+}
+
+.obsidian-mcp-result-row:first-of-type {
+  border-top: 0;
+}
+
+.obsidian-mcp-result-info {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.obsidian-mcp-result-actions {
+  align-items: center;
+  display: flex;
+  gap: var(--size-2-2);
+}
+
+.obsidian-mcp-breadcrumb {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+  margin-bottom: var(--size-2-2);
+}
+
+.obsidian-mcp-manual-edit {
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: var(--size-4-2);
+}
+
+.obsidian-mcp-manual-actions {
+  justify-content: flex-end;
+  margin-top: var(--size-2-2);
+}
+
+@media (max-width: 720px) {
+  .obsidian-mcp-section-heading,
+  .obsidian-mcp-setup-row,
+  .obsidian-mcp-action,
+  .obsidian-mcp-result-row {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .obsidian-mcp-section-heading,
+  .obsidian-mcp-setup-row,
+  .obsidian-mcp-action {
+    display: grid;
+  }
+
+  .obsidian-mcp-setup-actions {
+    justify-content: flex-start;
+  }
+
+  .obsidian-mcp-manager-search {
+    grid-template-columns: 1fr;
+  }
+}
