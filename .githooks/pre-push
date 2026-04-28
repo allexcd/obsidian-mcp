@@ -74,11 +74,13 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     continue
   fi
 
-  # New remote branch: validate commits not yet on any remote
+  # Only validate commits not yet present on any remote branch.
+  # Using --not --remotes in both cases ensures rebased branches don't
+  # re-validate commits already merged into main.
   if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]]; then
     range="$local_sha --not --remotes"
   else
-    range="$remote_sha..$local_sha"
+    range="$remote_sha..$local_sha --not --remotes"
   fi
 
   while IFS= read -r sha; do
