@@ -76,12 +76,13 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 
   # New remote branch: validate commits not yet on any remote
   if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]]; then
-    mapfile -t commits < <(git rev-list "$local_sha" --not --remotes)
+    range="$local_sha --not --remotes"
   else
-    mapfile -t commits < <(git rev-list "$remote_sha..$local_sha")
+    range="$remote_sha..$local_sha"
   fi
 
-  for sha in "${commits[@]:-}"; do
+  while IFS= read -r sha; do
+    [[ -z "$sha" ]] && continue
     validate_commit_subject "$sha" || {
       echo ""
       echo "Push rejected due to commit naming convention."
@@ -89,7 +90,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       echo ""
       exit 1
     }
-  done
+  done < <(git rev-list $range)
 done
 
 exit 0
