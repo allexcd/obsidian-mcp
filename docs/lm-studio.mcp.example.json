@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "obsidian-vault": {
+      "command": "node",
+      "args": [
+        "/ABSOLUTE/PATH/TO/Your Vault/.obsidian/plugins/obsidian-mcp/mcp-server.cjs"
+      ],
+      "env": {
+        "OBSIDIAN_MCP_BRIDGE_URL": "http://127.0.0.1:27125",
+        "OBSIDIAN_MCP_TOKEN": "PASTE_TOKEN_FROM_OBSIDIAN_PLUGIN",
+        "OBSIDIAN_MCP_EMBEDDINGS": "on",
+        "OBSIDIAN_MCP_EMBEDDING_BASE_URL": "http://127.0.0.1:1234/v1",
+        "OBSIDIAN_MCP_EMBEDDING_MODEL": "nomic-embed-text-v1.5"
+      }
+    }
+  }
+}

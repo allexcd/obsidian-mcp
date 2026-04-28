@@ -1,0 +1,84 @@
+name: Tag and Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag_created: ${{ steps.record.outputs.created }}
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from manifest.json
+        id: version
+        run: echo "value=$(node -p "require('./manifest.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Check if tag already exists
+        id: tag_check
+        run: |
+          if git rev-parse "${{ steps.version.outputs.value }}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create and push tag
+        if: steps.tag_check.outputs.exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.value }}" -m "${{ steps.version.outputs.value }}"
+          git push origin "${{ steps.version.outputs.value }}"
+
+      - name: Create GitHub release
+        if: steps.tag_check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.value }}" \
+            --title "${{ steps.version.outputs.value }}" \
+            --generate-notes
+
+      - name: Record tag created
+        id: record
+        if: steps.tag_check.outputs.exists == 'false'
+        run: echo "created=true" >> $GITHUB_OUTPUT
+
+  release-assets:
+    name: release-assets
+    needs: tag
+    if: needs.tag.outputs.tag_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+      - run: npm run plugin:package
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.tag.outputs.version }}
+        run: |
+          gh release upload "$VERSION" \
+            "build/obsidian-mcp/main.js" \
+            "build/obsidian-mcp/manifest.json" \
+            "build/obsidian-mcp/styles.css" \
+            "build/obsidian-mcp-${VERSION}.zip" \
+            --clobber

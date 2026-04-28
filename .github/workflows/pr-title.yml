@@ -1,0 +1,28 @@
+name: PR Title Check
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  check-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            chore
+            docs
+            refactor
+            test
+            hotfix
+          requireScope: false
+          subjectPattern: ^(\[[A-Z0-9]+-[0-9]+\] - )?[a-z].+[^.]$
+          subjectPatternError: |
+            PR title subject must optionally start with a ticket ID, followed by
+            lowercase description, not ending with a period.
+            Example: "feat(auth): add oauth login" or "feat(auth): [PROJ-123] - add oauth login"

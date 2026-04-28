@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Validate branch name and commit subjects before push.
+# Branch: feat|fix|chore|docs|refactor|test|hotfix + slash + lowercase-hyphen slug.
+# Commit subject: Conventional style used in this repo.
+
+BRANCH="$(git symbolic-ref --quiet --short HEAD || true)"
+
+# Ignore detached HEAD (tags, rebases, etc.)
+if [[ -z "$BRANCH" ]]; then
+  exit 0
+fi
+
+# Allow main/master (remote protections should still block direct pushes remotely)
+if [[ "$BRANCH" =~ ^(main|master)$ ]]; then
+  exit 0
+fi
+
+# Allow release branches created by scripts/release.cjs (release/X.Y.Z)
+if [[ "$BRANCH" =~ ^release/[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  exit 0
+fi
+
+BRANCH_PATTERN='^(feat|fix|chore|docs|refactor|test|hotfix)/[a-z0-9-]+$'
+
+if [[ ! "$BRANCH" =~ $BRANCH_PATTERN ]]; then
+  echo ""
+  echo "Invalid branch name: $BRANCH"
+  echo ""
+  echo "Expected format: <type>/<short-description>"
+  echo "Allowed types: feat, fix, chore, docs, refactor, test, hotfix"
+  echo "Example: feat/add-oauth-login"
+  echo ""
+  echo "If you really need to bypass once: git push --no-verify"
+  echo ""
+  exit 1
+fi
+
+# Commit subject format:
+# <type>(<scope>): [TICKET-123] - <short description>
+# scope and ticket are optional, description must be lowercase and no trailing period.
+COMMIT_PATTERN='^(feat|fix|chore|docs|refactor|test|hotfix)(\([a-z0-9._/-]+\))?: (\[[A-Z0-9]+-[0-9]+\] - )?[a-z].*[^.]$'
+
+validate_commit_subject() {
+  local sha="$1"
+  local subject
+  subject="$(git log --format=%s -n 1 "$sha")"
+
+  if [[ ${#subject} -gt 50 ]]; then
+    echo "Commit $sha subject too long (${#subject} > 50):"
+    echo "   $subject"
+    return 1
+  fi
+
+  if ! printf '%s' "$subject" | grep -Eq "$COMMIT_PATTERN"; then
+    echo "Commit $sha subject does not match convention:"
+    echo "   $subject"
+    echo ""
+    echo "Expected: <type>(<scope>): [TICKET-123] - <short description>"
+    echo "Valid types: feat, fix, chore, docs, refactor, test, hotfix"
+    echo "Scope and ticket are optional. Description must be lowercase and no trailing period."
+    return 1
+  fi
+
+  return 0
+}
+
+# Read refs from stdin as provided by pre-push.
+# Format per line: <local ref> <local sha> <remote ref> <remote sha>
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Deletion push: skip
+  if [[ "$local_sha" == "0000000000000000000000000000000000000000" ]]; then
+    continue
+  fi
+
+  # New remote branch: validate commits not yet on any remote
+  if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]]; then
+    mapfile -t commits < <(git rev-list "$local_sha" --not --remotes)
+  else
+    mapfile -t commits < <(git rev-list "$remote_sha..$local_sha")
+  fi
+
+  for sha in "${commits[@]:-}"; do
+    validate_commit_subject "$sha" || {
+      echo ""
+      echo "Push rejected due to commit naming convention."
+      echo "If you really need to bypass once: git push --no-verify"
+      echo ""
+      exit 1
+    }
+  done
+done
+
+exit 0
