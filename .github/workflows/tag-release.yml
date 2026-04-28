@@ -16,7 +16,7 @@ jobs:
       tag_created: ${{ steps.record.outputs.created }}
       version: ${{ steps.version.outputs.value }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -61,7 +61,7 @@ jobs:
     if: needs.tag.outputs.tag_created == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
         with:
