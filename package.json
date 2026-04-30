@@ -24,6 +24,7 @@
     "plugin:package": "npm run plugin:bundle && node scripts/package-plugin.mjs",
     "plugin:install": "npm run plugin:bundle && node scripts/install-plugin.mjs",
     "lint": "eslint packages scripts",
+    "check:paths": "node scripts/check-paths.mjs",
     "test": "vitest run",
     "typecheck": "tsc -b packages/shared packages/mcp-server packages/plugin --pretty false",
     "release": "node scripts/release.cjs"

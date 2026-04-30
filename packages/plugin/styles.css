@@ -42,6 +42,22 @@
   font-weight: var(--font-semibold);
 }
 
+.obsidian-mcp-footer {
+  align-items: center;
+  border-top: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-3) var(--size-4-2);
+  margin-top: var(--size-4-4);
+  padding-top: var(--size-4-3);
+}
+
+.obsidian-mcp-footer a {
+  color: var(--text-accent);
+  font-weight: var(--font-medium);
+}
+
 .obsidian-mcp-muted {
   color: var(--text-muted);
 }

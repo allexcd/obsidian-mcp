@@ -16,6 +16,7 @@ export interface ServerConfig {
   dbPath: string | null;
   dbPathSource: "env" | "bridge";
   maxResults: number;
+  autoIndex: boolean;
   embeddings: EmbeddingConfig;
 }
 
@@ -26,8 +27,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     dbPath: env.OBSIDIAN_MCP_DB ? expandHome(env.OBSIDIAN_MCP_DB) : null,
     dbPathSource: env.OBSIDIAN_MCP_DB ? "env" : "bridge",
     maxResults: clampNumber(env.OBSIDIAN_MCP_MAX_RESULTS, DEFAULT_PAGE_LIMIT, 1, 100),
+    autoIndex: parseEnabled(env.OBSIDIAN_MCP_AUTO_INDEX, true),
     embeddings: {
-      enabled: (env.OBSIDIAN_MCP_EMBEDDINGS ?? "off").toLowerCase() === "on",
+      enabled: parseEnabled(env.OBSIDIAN_MCP_EMBEDDINGS, false),
       baseUrl: env.OBSIDIAN_MCP_EMBEDDING_BASE_URL ?? null,
       apiKey: env.OBSIDIAN_MCP_EMBEDDING_API_KEY ?? null,
       model: env.OBSIDIAN_MCP_EMBEDDING_MODEL ?? null,
@@ -68,4 +70,18 @@ function clampNumber(value: string | undefined, fallback: number, min: number, m
     return fallback;
   }
   return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
+function parseEnabled(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) {
+    return fallback;
+  }
+  const normalized = value.toLowerCase().trim();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
 }
