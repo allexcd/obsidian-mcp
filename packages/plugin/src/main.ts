@@ -41,7 +41,7 @@ export default class ObsidianMcpPlugin extends Plugin {
     });
 
     if (!Platform.isDesktopApp) {
-      new Notice("Obsidian MCP is desktop-only.");
+      new Notice("MCP Vault Bridge is desktop-only.");
       return;
     }
 
@@ -49,7 +49,7 @@ export default class ObsidianMcpPlugin extends Plugin {
       await this.ensureToken();
     } catch (error) {
       console.error("Unable to initialize MCP bridge token", error);
-      new Notice("Obsidian MCP could not access Obsidian SecretStorage.");
+      new Notice("MCP Vault Bridge could not access Obsidian SecretStorage.");
       return;
     }
 
@@ -101,7 +101,7 @@ export default class ObsidianMcpPlugin extends Plugin {
     } catch (error) {
       this.secretStorageFailed = true;
       this.lastTokenError = formatTokenError(error);
-      console.error("Unable to access Obsidian MCP token in SecretStorage; using plugin data fallback", error);
+      console.error("Unable to access MCP Vault Bridge token in SecretStorage; using plugin data fallback", error);
       return this.ensureFallbackToken();
     }
   }
@@ -119,7 +119,7 @@ export default class ObsidianMcpPlugin extends Plugin {
       } catch (error) {
         this.secretStorageFailed = true;
         this.lastTokenError = formatTokenError(error);
-        console.error("Unable to regenerate Obsidian MCP token in SecretStorage; using plugin data fallback", error);
+        console.error("Unable to regenerate MCP Vault Bridge token in SecretStorage; using plugin data fallback", error);
       }
     }
 
@@ -141,12 +141,12 @@ export default class ObsidianMcpPlugin extends Plugin {
       const token = await this.ensureToken();
       this.bridge = await createBridgeServer(this, token);
       this.lastBridgeError = null;
-      new Notice(`Obsidian MCP listening on 127.0.0.1:${this.settings.port}.`);
+      new Notice(`MCP Vault Bridge listening on 127.0.0.1:${this.settings.port}.`);
     } catch (error) {
       this.bridge = null;
       this.lastBridgeError = formatBridgeError(error);
       console.error("Unable to start MCP bridge", error);
-      new Notice(`Obsidian MCP bridge could not start: ${this.lastBridgeError}`);
+      new Notice(`MCP Vault Bridge could not start: ${this.lastBridgeError}`);
     }
   }
 

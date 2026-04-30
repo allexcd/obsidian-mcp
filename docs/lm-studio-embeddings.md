@@ -38,7 +38,7 @@ Open the LM Studio MCP settings and edit `mcp.json`. Use the full absolute path 
     "obsidian-vault": {
       "command": "node",
       "args": [
-        "/ABSOLUTE/PATH/TO/Your Vault/.obsidian/plugins/obsidian-mcp/mcp-server.cjs"
+        "/ABSOLUTE/PATH/TO/Your Vault/.obsidian/plugins/mcp-vault-bridge/mcp-server.cjs"
       ],
       "env": {
         "OBSIDIAN_MCP_BRIDGE_URL": "http://127.0.0.1:27125",

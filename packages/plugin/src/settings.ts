@@ -883,7 +883,7 @@ export function buildVaultScopePreview(plugin: ObsidianMcpPlugin): VaultScopePre
 
 function renderHeader(containerEl: HTMLElement): void {
   const header = containerEl.createDiv({ cls: "obsidian-mcp-header" });
-  header.createEl("h2", { text: "Obsidian MCP" });
+  header.createEl("h2", { text: "MCP Vault Bridge" });
   header.createEl("p", {
     text: "Expose your vault to local MCP clients through a read-only bridge. Returned note snippets can be sent to the model provider used by that client, so keep private areas excluded.",
     cls: "obsidian-mcp-muted"
@@ -1001,7 +1001,7 @@ function renderRuntimeStatus(element: HTMLElement, status: RuntimeStatus): void 
 
   if (!status.mcpServerPresent || !status.sqliteRuntimePresent) {
     element.createEl("p", {
-      text: "If SQLite runtime is missing, click Install SQLite runtime. If mcp-server.cjs is missing, reinstall the complete obsidian-mcp plugin folder.",
+      text: "If SQLite runtime is missing, click Install SQLite runtime. If mcp-server.cjs is missing, reinstall the complete mcp-vault-bridge plugin folder.",
       cls: "obsidian-mcp-muted"
     });
   }
@@ -1040,7 +1040,7 @@ function extractTags(plugin: ObsidianMcpPlugin, path: string): string[] {
 }
 
 function buildClientConfig(plugin: ObsidianMcpPlugin, kind: "lm-studio" | "claude"): string {
-  const mcpServerPath = getMcpServerPath(plugin) ?? "/ABSOLUTE/PATH/TO/Your Vault/.obsidian/plugins/obsidian-mcp/mcp-server.cjs";
+  const mcpServerPath = getMcpServerPath(plugin) ?? "/ABSOLUTE/PATH/TO/Your Vault/.obsidian/plugins/mcp-vault-bridge/mcp-server.cjs";
   const baseConfig = {
     mcpServers: {
       "obsidian-vault": {
@@ -1338,10 +1338,10 @@ async function writeRuntimePackageJson(pluginDirectory: string): Promise<void> {
     joinFilesystemPath(pluginDirectory, "package.json"),
     `${JSON.stringify(
       {
-        name: "obsidian-mcp-runtime",
+        name: "mcp-vault-bridge-runtime",
         version: "0.1.0",
         private: true,
-        description: "Runtime dependencies for the Obsidian MCP server bundled inside the Obsidian plugin.",
+        description: "Runtime dependencies for the MCP Vault Bridge server bundled inside the Obsidian plugin.",
         dependencies: RUNTIME_DEPENDENCIES
       },
       null,

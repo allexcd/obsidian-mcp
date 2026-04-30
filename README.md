@@ -1,4 +1,4 @@
-# Obsidian MCP
+# MCP Vault Bridge
 
 [![CI](https://github.com/allexcd/obsidian-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/allexcd/obsidian-mcp/actions/workflows/ci.yml)
 [![Release](https://github.com/allexcd/obsidian-mcp/actions/workflows/tag-release.yml/badge.svg)](https://github.com/allexcd/obsidian-mcp/actions/workflows/tag-release.yml)
@@ -23,12 +23,12 @@ Vault content returned by MCP tools may be forwarded to the model by the host. C
 
 ### End users
 
-1. Download the latest `obsidian-mcp-X.Y.Z.zip` from the [Releases](https://github.com/allexcd/obsidian-mcp/releases) page.
-2. Unzip and copy the complete `obsidian-mcp` folder into your vault:
+1. Download the latest `mcp-vault-bridge-X.Y.Z.zip` from the [Releases](https://github.com/allexcd/obsidian-mcp/releases) page.
+2. Unzip and copy the complete `mcp-vault-bridge` folder into your vault:
    ```text
-   Your Vault/.obsidian/plugins/obsidian-mcp/
+   Your Vault/.obsidian/plugins/mcp-vault-bridge/
    ```
-3. Restart Obsidian (or reload community plugins) and enable **Obsidian MCP**.
+3. Restart Obsidian (or reload community plugins) and enable **MCP Vault Bridge**.
 4. Open the plugin settings, click **Check runtime**, then **Install SQLite runtime**.
 
 > Node.js 20+ and npm must be available for the runtime install step. If they are missing the settings screen will say so.
@@ -59,7 +59,7 @@ Open the Claude Desktop MCP config (`Developer → Edit config`) and add:
     "obsidian-vault": {
       "command": "node",
       "args": [
-        "/ABSOLUTE/PATH/TO/Your Vault/.obsidian/plugins/obsidian-mcp/mcp-server.cjs"
+        "/ABSOLUTE/PATH/TO/Your Vault/.obsidian/plugins/mcp-vault-bridge/mcp-server.cjs"
       ],
       "env": {
         "OBSIDIAN_MCP_BRIDGE_URL": "http://127.0.0.1:27125",
@@ -84,7 +84,7 @@ Add the same config to LM Studio's `mcp.json`. Without embeddings, vault search 
     "obsidian-vault": {
       "command": "node",
       "args": [
-        "/ABSOLUTE/PATH/TO/Your Vault/.obsidian/plugins/obsidian-mcp/mcp-server.cjs"
+        "/ABSOLUTE/PATH/TO/Your Vault/.obsidian/plugins/mcp-vault-bridge/mcp-server.cjs"
       ],
       "env": {
         "OBSIDIAN_MCP_BRIDGE_URL": "http://127.0.0.1:27125",

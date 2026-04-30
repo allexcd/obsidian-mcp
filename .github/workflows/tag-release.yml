@@ -77,8 +77,8 @@ jobs:
           VERSION: ${{ needs.tag.outputs.version }}
         run: |
           gh release upload "$VERSION" \
-            "build/obsidian-mcp/main.js" \
-            "build/obsidian-mcp/manifest.json" \
-            "build/obsidian-mcp/styles.css" \
-            "build/obsidian-mcp-${VERSION}.zip" \
+            "build/mcp-vault-bridge/main.js" \
+            "build/mcp-vault-bridge/manifest.json" \
+            "build/mcp-vault-bridge/styles.css" \
+            "build/mcp-vault-bridge-${VERSION}.zip" \
             --clobber

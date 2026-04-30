@@ -5,15 +5,15 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const buildDir = join(root, "build");
-const pluginDir = join(buildDir, "obsidian-mcp");
+const pluginDir = join(buildDir, "mcp-vault-bridge");
 const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-const archiveName = `obsidian-mcp-${packageJson.version}.zip`;
+const archiveName = `mcp-vault-bridge-${packageJson.version}.zip`;
 const archivePath = join(buildDir, archiveName);
 
 await assertDirectory(pluginDir, "Bundled plugin directory");
 await mkdir(buildDir, { recursive: true });
 await rm(archivePath, { force: true });
-await run("zip", ["-r", archivePath, "obsidian-mcp"], buildDir);
+await run("zip", ["-r", archivePath, "mcp-vault-bridge"], buildDir);
 
 console.log(`Standalone Obsidian plugin archive: ${archivePath}`);
 console.log("Archive created without node_modules. Users need Node.js, npm, and network access to install runtime dependencies from plugin settings.");
@@ -40,7 +40,7 @@ function run(command, args, cwd) {
       if (error.code === "ENOENT") {
         rejectRun(
           new Error(
-            "The zip command is not available. Install zip, or share the build/obsidian-mcp folder directly."
+            "The zip command is not available. Install zip, or share the build/mcp-vault-bridge folder directly."
           )
         );
         return;

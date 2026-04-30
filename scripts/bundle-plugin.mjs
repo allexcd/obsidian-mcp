@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const buildDir = join(root, "build");
-const outputDir = join(buildDir, "obsidian-mcp");
+const outputDir = join(buildDir, "mcp-vault-bridge");
 const files = [
   ["manifest.json", "manifest.json"],
   ["packages/plugin/main.js", "main.js"],
@@ -30,12 +30,12 @@ await writeRuntimePackageJson(outputDir);
 
 await writeFile(
   join(outputDir, "README.md"),
-  `# Obsidian MCP
+  `# MCP Vault Bridge
 
-This whole folder is the standalone local Obsidian plugin. Copy the complete \`obsidian-mcp\` folder into:
+This whole folder is the standalone local Obsidian plugin. Copy the complete \`mcp-vault-bridge\` folder into:
 
 \`\`\`text
-Your Vault/.obsidian/plugins/obsidian-mcp/
+Your Vault/.obsidian/plugins/mcp-vault-bridge/
 \`\`\`
 
 Keep these files together:
@@ -50,7 +50,7 @@ After the runtime is installed, copy the MCP token from settings.
 Claude Desktop and LM Studio should run:
 
 \`\`\`text
-node /absolute/path/to/Your Vault/.obsidian/plugins/obsidian-mcp/mcp-server.cjs
+node /absolute/path/to/Your Vault/.obsidian/plugins/mcp-vault-bridge/mcp-server.cjs
 \`\`\`
 
 Use the copied token as \`OBSIDIAN_MCP_TOKEN\`. Keep Obsidian open while the MCP server is in use.
@@ -79,10 +79,10 @@ async function writeRuntimePackageJson(directory) {
     join(directory, "package.json"),
     `${JSON.stringify(
       {
-        name: "obsidian-mcp-runtime",
+        name: "mcp-vault-bridge-runtime",
         version: "0.1.0",
         private: true,
-        description: "Runtime dependencies for the Obsidian MCP server bundled inside the Obsidian plugin.",
+        description: "Runtime dependencies for the MCP Vault Bridge server bundled inside the Obsidian plugin.",
         dependencies: runtimeDependencies
       },
       null,
