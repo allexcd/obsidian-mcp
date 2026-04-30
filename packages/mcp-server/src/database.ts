@@ -358,7 +358,7 @@ function loadBetterSqlite3(): typeof Database {
   } catch (error) {
     if (isModuleNotFoundError(error)) {
       throw new Error(
-        "SQLite runtime dependency better-sqlite3 is not installed. Open Obsidian MCP plugin settings, click Check runtime, then click Install SQLite runtime. After installation, restart or reload the MCP server in Claude Desktop or LM Studio."
+        "SQLite runtime dependency better-sqlite3 is not installed. Open MCP Vault Bridge plugin settings, click Check runtime, then click Install SQLite runtime. After installation, restart or reload the MCP server in Claude Desktop or LM Studio."
       );
     }
     throw error;

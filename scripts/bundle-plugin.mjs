@@ -30,7 +30,7 @@ await writeRuntimePackageJson(outputDir);
 
 await writeFile(
   join(outputDir, "README.md"),
-  `# Obsidian MCP
+  `# MCP Vault Bridge
 
 This whole folder is the standalone local Obsidian plugin. Copy the complete \`mcp-vault-bridge\` folder into:
 
@@ -82,7 +82,7 @@ async function writeRuntimePackageJson(directory) {
         name: "mcp-vault-bridge-runtime",
         version: "0.1.0",
         private: true,
-        description: "Runtime dependencies for the Obsidian MCP server bundled inside the Obsidian plugin.",
+        description: "Runtime dependencies for the MCP Vault Bridge server bundled inside the Obsidian plugin.",
         dependencies: runtimeDependencies
       },
       null,

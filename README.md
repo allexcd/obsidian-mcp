@@ -1,4 +1,4 @@
-# Obsidian MCP
+# MCP Vault Bridge
 
 [![CI](https://github.com/allexcd/obsidian-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/allexcd/obsidian-mcp/actions/workflows/ci.yml)
 [![Release](https://github.com/allexcd/obsidian-mcp/actions/workflows/tag-release.yml/badge.svg)](https://github.com/allexcd/obsidian-mcp/actions/workflows/tag-release.yml)
@@ -28,7 +28,7 @@ Vault content returned by MCP tools may be forwarded to the model by the host. C
    ```text
    Your Vault/.obsidian/plugins/mcp-vault-bridge/
    ```
-3. Restart Obsidian (or reload community plugins) and enable **Obsidian MCP**.
+3. Restart Obsidian (or reload community plugins) and enable **MCP Vault Bridge**.
 4. Open the plugin settings, click **Check runtime**, then **Install SQLite runtime**.
 
 > Node.js 20+ and npm must be available for the runtime install step. If they are missing the settings screen will say so.

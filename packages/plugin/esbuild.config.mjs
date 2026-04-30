@@ -18,9 +18,8 @@ const context = await esbuild.context({
 
 if (watch) {
   await context.watch();
-  console.log("Watching Obsidian MCP plugin...");
+  console.log("Watching MCP Vault Bridge plugin...");
 } else {
   await context.rebuild();
   await context.dispose();
 }
-

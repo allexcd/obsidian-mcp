@@ -98,7 +98,7 @@ Once a release is shipped and field-tested, submit a PR to [`obsidianmd/obsidian
 ```json
 {
   "id": "mcp-vault-bridge",
-  "name": "Obsidian MCP",
+  "name": "MCP Vault Bridge",
   "author": "allexcd",
   "description": "Read-only, exclusion-based local bridge for using an Obsidian vault through MCP clients.",
   "repo": "allexcd/obsidian-mcp"

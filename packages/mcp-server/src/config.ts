@@ -47,7 +47,7 @@ export async function resolveRuntimeConfig(config: ServerConfig, bridge: BridgeC
   const dbPath = status.pluginDirectory.defaultDatabasePath;
   if (!dbPath) {
     throw new Error(
-      "Could not discover the Obsidian plugin folder for SQLite storage. Keep Obsidian open on desktop, enable the Obsidian MCP plugin, or set OBSIDIAN_MCP_DB explicitly."
+      "Could not discover the Obsidian plugin folder for SQLite storage. Keep Obsidian open on desktop, enable the MCP Vault Bridge plugin, or set OBSIDIAN_MCP_DB explicitly."
     );
   }
 

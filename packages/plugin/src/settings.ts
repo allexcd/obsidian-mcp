@@ -883,7 +883,7 @@ export function buildVaultScopePreview(plugin: ObsidianMcpPlugin): VaultScopePre
 
 function renderHeader(containerEl: HTMLElement): void {
   const header = containerEl.createDiv({ cls: "obsidian-mcp-header" });
-  header.createEl("h2", { text: "Obsidian MCP" });
+  header.createEl("h2", { text: "MCP Vault Bridge" });
   header.createEl("p", {
     text: "Expose your vault to local MCP clients through a read-only bridge. Returned note snippets can be sent to the model provider used by that client, so keep private areas excluded.",
     cls: "obsidian-mcp-muted"
@@ -1341,7 +1341,7 @@ async function writeRuntimePackageJson(pluginDirectory: string): Promise<void> {
         name: "mcp-vault-bridge-runtime",
         version: "0.1.0",
         private: true,
-        description: "Runtime dependencies for the Obsidian MCP server bundled inside the Obsidian plugin.",
+        description: "Runtime dependencies for the MCP Vault Bridge server bundled inside the Obsidian plugin.",
         dependencies: RUNTIME_DEPENDENCIES
       },
       null,
