@@ -1,7 +1,7 @@
 {
   "id": "obsidian-mcp",
   "name": "Obsidian MCP",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "1.8.0",
   "description": "Read-only, exclusion-based local bridge for using an Obsidian vault through MCP clients.",
   "author": "allexcd",
