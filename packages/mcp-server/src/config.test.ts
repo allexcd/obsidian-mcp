@@ -36,9 +36,9 @@ describe("loadConfig", () => {
         bridgeVersion: "0.1.0",
         readOnly: true,
         pluginDirectory: {
-          vaultPath: ".obsidian/plugins/obsidian-mcp",
-          filesystemPath: "/vault/.obsidian/plugins/obsidian-mcp",
-          defaultDatabasePath: "/vault/.obsidian/plugins/obsidian-mcp/index.sqlite"
+          vaultPath: ".obsidian/plugins/mcp-vault-bridge",
+          filesystemPath: "/vault/.obsidian/plugins/mcp-vault-bridge",
+          defaultDatabasePath: "/vault/.obsidian/plugins/mcp-vault-bridge/index.sqlite"
         },
         scope: { excludedFolders: [], excludedFiles: [], excludedTags: [] },
         vaultPreview: {
@@ -54,7 +54,7 @@ describe("loadConfig", () => {
       })
     } as never);
 
-    expect(resolved.dbPath).toBe("/vault/.obsidian/plugins/obsidian-mcp/index.sqlite");
+    expect(resolved.dbPath).toBe("/vault/.obsidian/plugins/mcp-vault-bridge/index.sqlite");
     expect(resolved.dbPathSource).toBe("bridge");
   });
 

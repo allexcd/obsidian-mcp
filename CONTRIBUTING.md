@@ -87,7 +87,7 @@ After the PR is merged, the `Tag and Release` workflow:
 
 1. Tags `X.Y.Z` (read from `manifest.json`).
 2. Creates a GitHub Release with auto-generated notes.
-3. Uploads four assets: `main.js`, `manifest.json`, `styles.css`, and `obsidian-mcp-X.Y.Z.zip`.
+3. Uploads four assets: `main.js`, `manifest.json`, `styles.css`, and `mcp-vault-bridge-X.Y.Z.zip`.
 
 The first three are required by the [Obsidian Community Plugins submission rules](https://docs.obsidian.md/Plugins/Releasing/Submission+requirements+for+plugins). The zip is a convenience for drop-in installs.
 
@@ -97,7 +97,7 @@ Once a release is shipped and field-tested, submit a PR to [`obsidianmd/obsidian
 
 ```json
 {
-  "id": "obsidian-mcp",
+  "id": "mcp-vault-bridge",
   "name": "Obsidian MCP",
   "author": "allexcd",
   "description": "Read-only, exclusion-based local bridge for using an Obsidian vault through MCP clients.",

@@ -27,10 +27,10 @@ await writeFile(
   join(buildDir, "README.md"),
   `# Built Artifacts
 
-- \`obsidian-mcp/\`: complete folder to copy or install into an Obsidian vault as the plugin.
-- \`obsidian-mcp-*.zip\`: optional local archives created by \`npm run plugin:package\`.
+- \`mcp-vault-bridge/\`: complete folder to copy or install into an Obsidian vault as the plugin.
+- \`mcp-vault-bridge-*.zip\`: optional local archives created by \`npm run plugin:package\`.
 
-Claude Desktop and LM Studio should point at \`obsidian-mcp/mcp-server.cjs\` after the plugin folder is installed in a vault.
+Claude Desktop and LM Studio should point at \`mcp-vault-bridge/mcp-server.cjs\` after the plugin folder is installed in a vault.
 `,
   "utf8"
 );

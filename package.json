@@ -1,6 +1,6 @@
 {
   "name": "obsidian-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Read-only, exclusion-based local bridge for using an Obsidian vault through MCP clients (Claude Desktop, LM Studio).",
   "license": "MIT",

@@ -1001,7 +1001,7 @@ function renderRuntimeStatus(element: HTMLElement, status: RuntimeStatus): void 
 
   if (!status.mcpServerPresent || !status.sqliteRuntimePresent) {
     element.createEl("p", {
-      text: "If SQLite runtime is missing, click Install SQLite runtime. If mcp-server.cjs is missing, reinstall the complete obsidian-mcp plugin folder.",
+      text: "If SQLite runtime is missing, click Install SQLite runtime. If mcp-server.cjs is missing, reinstall the complete mcp-vault-bridge plugin folder.",
       cls: "obsidian-mcp-muted"
     });
   }
@@ -1040,7 +1040,7 @@ function extractTags(plugin: ObsidianMcpPlugin, path: string): string[] {
 }
 
 function buildClientConfig(plugin: ObsidianMcpPlugin, kind: "lm-studio" | "claude"): string {
-  const mcpServerPath = getMcpServerPath(plugin) ?? "/ABSOLUTE/PATH/TO/Your Vault/.obsidian/plugins/obsidian-mcp/mcp-server.cjs";
+  const mcpServerPath = getMcpServerPath(plugin) ?? "/ABSOLUTE/PATH/TO/Your Vault/.obsidian/plugins/mcp-vault-bridge/mcp-server.cjs";
   const baseConfig = {
     mcpServers: {
       "obsidian-vault": {
@@ -1338,7 +1338,7 @@ async function writeRuntimePackageJson(pluginDirectory: string): Promise<void> {
     joinFilesystemPath(pluginDirectory, "package.json"),
     `${JSON.stringify(
       {
-        name: "obsidian-mcp-runtime",
+        name: "mcp-vault-bridge-runtime",
         version: "0.1.0",
         private: true,
         description: "Runtime dependencies for the Obsidian MCP server bundled inside the Obsidian plugin.",
