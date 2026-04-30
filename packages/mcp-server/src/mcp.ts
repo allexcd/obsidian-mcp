@@ -42,11 +42,7 @@ export async function startMcpServer(runtime: McpRuntime): Promise<void> {
     async () =>
       jsonResponse({
         bridge: await runtime.bridge.status(),
-        index: {
-          ...runtime.db.stats(),
-          databasePath: runtime.config.dbPath,
-          databasePathSource: runtime.config.dbPathSource
-        },
+        index: getIndexStatus(runtime),
         embeddings: {
           enabled: runtime.embeddings.enabled,
           provider: runtime.embeddings.provider,
@@ -69,10 +65,10 @@ export async function startMcpServer(runtime: McpRuntime): Promise<void> {
     "index_status",
     {
       title: "Index Status",
-      description: "Return local SQLite index counts and last indexed time.",
+      description: "Return local SQLite index counts, auto-index state, and last indexed time.",
       inputSchema: {}
     },
-    async () => jsonResponse(runtime.db.stats())
+    async () => jsonResponse(getIndexStatus(runtime))
   );
 
   server.registerTool(
@@ -89,7 +85,8 @@ export async function startMcpServer(runtime: McpRuntime): Promise<void> {
       }
     },
     async ({ query, tag, folder, limit, offset }) => {
-      const index = runtime.db.stats();
+      await autoRefreshIfEmpty(runtime);
+      const index = getIndexStatus(runtime);
       return jsonResponse({
         notes: runtime.db.listNotes({
           query,
@@ -99,7 +96,7 @@ export async function startMcpServer(runtime: McpRuntime): Promise<void> {
           offset: offset ?? 0
         }),
         index,
-        hint: index.noteCount === 0 ? "The local SQLite index is empty. Run refresh_index before listing notes." : undefined
+        hint: emptyIndexHint(runtime)
       });
     }
   );
@@ -119,7 +116,8 @@ export async function startMcpServer(runtime: McpRuntime): Promise<void> {
     async ({ query, mode, limit, offset }) => {
       const requested = mode ?? "lexical";
       const cappedLimit = limit ?? runtime.config.maxResults;
-      const index = runtime.db.stats();
+      await autoRefreshIfEmpty(runtime);
+      const index = getIndexStatus(runtime);
       const lexical = requested === "semantic" ? [] : runtime.db.searchFts(query, cappedLimit, offset ?? 0);
       let semantic: SearchResult[] = [];
       if ((requested === "semantic" || requested === "hybrid") && runtime.embeddings.enabled) {
@@ -135,7 +133,7 @@ export async function startMcpServer(runtime: McpRuntime): Promise<void> {
         index,
         hint:
           index.noteCount === 0
-            ? "The local SQLite index is empty. Run refresh_index before searching notes."
+            ? emptyIndexHint(runtime)
             : requested === "semantic" && !runtime.embeddings.enabled
               ? "Semantic search was requested, but embeddings are disabled. Use lexical search or enable embeddings."
               : undefined
@@ -203,6 +201,9 @@ export async function startMcpServer(runtime: McpRuntime): Promise<void> {
   );
 
   const transport = new StdioServerTransport();
+  if (runtime.config.autoIndex) {
+    runtime.indexer.startBackgroundRefresh();
+  }
   await server.connect(transport);
 }
 
@@ -228,4 +229,53 @@ function mergeResults<T extends { path: string; score: number }>(a: T[], b: T[],
   return Array.from(map.values())
     .sort((left, right) => right.score - left.score)
     .slice(0, limit);
+}
+
+async function autoRefreshIfEmpty(runtime: McpRuntime): Promise<void> {
+  if (!runtime.config.autoIndex) {
+    return;
+  }
+  try {
+    await runtime.indexer.refreshIfEmpty();
+  } catch {
+    // The tool result includes the retained indexer error so the client can explain what happened.
+  }
+}
+
+function getIndexStatus(runtime: McpRuntime): ReturnType<VaultDatabase["stats"]> & {
+  databasePath: string | null;
+  databasePathSource: ServerConfig["dbPathSource"];
+  autoIndexEnabled: boolean;
+  indexing: boolean;
+  lastError: string | null;
+} {
+  const indexer = runtime.indexer.status();
+  return {
+    ...runtime.db.stats(),
+    databasePath: runtime.config.dbPath,
+    databasePathSource: runtime.config.dbPathSource,
+    autoIndexEnabled: runtime.config.autoIndex,
+    indexing: indexer.indexing,
+    lastError: indexer.lastError
+  };
+}
+
+function emptyIndexHint(runtime: McpRuntime): string | undefined {
+  const stats = runtime.db.stats();
+  if (stats.noteCount > 0) {
+    return undefined;
+  }
+
+  const indexer = runtime.indexer.status();
+  if (runtime.config.autoIndex) {
+    if (indexer.indexing) {
+      return "Indexing is starting. Try again in a moment.";
+    }
+    if (indexer.lastError) {
+      return `Auto-index could not finish: ${indexer.lastError}`;
+    }
+    return "No allowed notes are indexed yet. Check vault exclusions or run refresh_index to refresh manually.";
+  }
+
+  return "The local SQLite index is empty. Run refresh_index before listing or searching notes.";
 }

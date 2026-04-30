@@ -53,6 +53,7 @@ const RUNTIME_DEPENDENCIES = {
 };
 
 const SEARCH_RESULT_LIMIT = 40;
+const GITHUB_REPO_URL = "https://github.com/allexcd/obsidian-mcp";
 
 type ExclusionKind = "folder" | "file" | "tag";
 type StatusTone = "good" | "warning" | "neutral";
@@ -139,17 +140,19 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
     switch (this.activeTab) {
       case "setup":
         this.renderSetup(containerEl, preview);
-        return;
+        break;
       case "vault":
         this.renderVaultScope(containerEl, preview);
-        return;
+        break;
       case "clients":
         this.renderClientSetup(containerEl);
-        return;
+        break;
       case "advanced":
         this.renderAdvanced(containerEl);
-        return;
+        break;
     }
+
+    renderSettingsFooter(containerEl);
   }
 
   private renderTabs(containerEl: HTMLElement): void {
@@ -209,27 +212,50 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
       : this.plugin.settings.bridgeEnabled
         ? "Stopped"
         : "Disabled";
+    const bridgeDetail = this.plugin.bridgeRunning
+      ? `Listening at http://127.0.0.1:${this.plugin.settings.port}.`
+      : this.plugin.lastBridgeError
+        ? this.plugin.lastBridgeError
+        : this.plugin.settings.bridgeEnabled
+          ? "The bridge is enabled but currently stopped."
+          : "The bridge is disabled in Advanced settings.";
+    const bridgeAction = this.plugin.bridgeRunning
+      ? "Restart bridge"
+      : this.plugin.settings.bridgeEnabled
+        ? "Start bridge"
+        : "Enable bridge";
     const bridgeRow = createSetupRow(
       rows,
       2,
       "Bridge",
       bridgeStatus,
       this.plugin.bridgeRunning ? "good" : "warning",
-      this.plugin.bridgeRunning
-        ? `Listening at http://127.0.0.1:${this.plugin.settings.port}.`
-        : this.plugin.settings.bridgeEnabled
-          ? "The bridge is enabled but currently stopped."
-          : "The bridge is disabled in Advanced settings."
+      bridgeDetail
     );
-    addSetupButton(bridgeRow.actionsEl, "Restart bridge", "refresh-cw", async (button) => {
-      await withBusyButton(button, "Restarting", "Restart bridge", async () => {
+    addSetupButton(bridgeRow.actionsEl, bridgeAction, "refresh-cw", async (button) => {
+      await withBusyButton(button, "Starting", bridgeAction, async () => {
+        if (!this.plugin.settings.bridgeEnabled) {
+          this.plugin.settings.bridgeEnabled = true;
+          await this.plugin.saveSettings();
+        }
         await this.plugin.restartBridge();
-        new Notice(this.plugin.bridgeRunning ? "MCP bridge restarted." : "MCP bridge is stopped.");
+        new Notice(
+          this.plugin.bridgeRunning
+            ? "MCP bridge is running."
+            : `MCP bridge is stopped${this.plugin.lastBridgeError ? `: ${this.plugin.lastBridgeError}` : "."}`
+        );
         this.display();
       });
     });
 
-    const tokenRow = createSetupRow(rows, 3, "Token", "Checking", "neutral", "Copy token reuses the existing token; it only creates one if none exists yet.");
+    const tokenRow = createSetupRow(
+      rows,
+      3,
+      "Token",
+      "Checking",
+      "neutral",
+      "Copy token reuses this install's token; it only creates one if none exists yet."
+    );
     addSetupButton(tokenRow.actionsEl, "Copy token", "key-round", async (button) => {
       try {
         const token = await this.plugin.ensureToken();
@@ -260,7 +286,12 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
       })
       .catch((error) => {
         console.error("Unable to read MCP token", error);
-        updateSetupRow(tokenRow, "Unavailable", "warning", "Check the developer console for details.");
+        updateSetupRow(
+          tokenRow,
+          "Unavailable",
+          "warning",
+          this.plugin.lastTokenError ? `Token storage error: ${this.plugin.lastTokenError}` : "Check the developer console for details."
+        );
       });
 
     const serverPath = getMcpServerPath(this.plugin);
@@ -857,6 +888,19 @@ function renderHeader(containerEl: HTMLElement): void {
     text: "Expose your vault to local MCP clients through a read-only bridge. Returned note snippets can be sent to the model provider used by that client, so keep private areas excluded.",
     cls: "obsidian-mcp-muted"
   });
+}
+
+function renderSettingsFooter(containerEl: HTMLElement): void {
+  const footer = containerEl.createDiv({ cls: "obsidian-mcp-footer" });
+  footer.createSpan({ text: "Open source and built for local-first vault access." });
+
+  const repoLink = footer.createEl("a", { text: "View GitHub repo", href: GITHUB_REPO_URL });
+  repoLink.setAttr("target", "_blank");
+  repoLink.setAttr("rel", "noopener noreferrer");
+
+  const starLink = footer.createEl("a", { text: "Star on GitHub", href: `${GITHUB_REPO_URL}/stargazers` });
+  starLink.setAttr("target", "_blank");
+  starLink.setAttr("rel", "noopener noreferrer");
 }
 
 function createSection(containerEl: HTMLElement, title: string, description: string): HTMLElement {

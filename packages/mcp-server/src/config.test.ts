@@ -8,6 +8,7 @@ describe("loadConfig", () => {
     expect(config.bridgeUrl).toBe("http://127.0.0.1:27125");
     expect(config.dbPath).toBeNull();
     expect(config.dbPathSource).toBe("bridge");
+    expect(config.autoIndex).toBe(true);
   });
 
   it("requires explicit embedding opt-in", () => {
@@ -18,6 +19,11 @@ describe("loadConfig", () => {
     });
     expect(config.embeddings.enabled).toBe(true);
     expect(config.embeddings.model).toBe("local");
+  });
+
+  it("allows auto-indexing to be disabled", () => {
+    const config = loadConfig({ OBSIDIAN_MCP_AUTO_INDEX: "off" });
+    expect(config.autoIndex).toBe(false);
   });
 
   it("resolves the default database path from the Obsidian plugin folder", async () => {
