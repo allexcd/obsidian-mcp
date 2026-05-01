@@ -369,7 +369,7 @@ function isModuleNotFoundError(error: unknown): error is Error & { code: "MODULE
   return error instanceof Error && "code" in error && error.code === "MODULE_NOT_FOUND";
 }
 
-function getRequire(): NodeRequire {
+function getRequire(): NodeJS.Require {
   try {
     if (typeof __filename !== "undefined") {
       return createRequire(__filename);

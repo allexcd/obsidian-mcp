@@ -96,7 +96,47 @@ Add the same config to LM Studio's `mcp.json`. Without embeddings, vault search 
 }
 ```
 
-For semantic search, add an embedding model and three extra env vars — see [LM Studio with embeddings](docs/lm-studio-embeddings.md).
+### Optional embeddings
+
+Embeddings are optional. Without them, search uses SQLite full-text search: it is local, fast, and good for exact words, titles, tags, and phrases. With embeddings enabled, the MCP server can also do semantic/vector search, so queries like “notes about long-term planning” can find notes that use different wording.
+
+The plugin/MCP server does not automatically know which embedding model LM Studio loaded. The model value must match the identifier exposed by LM Studio's embeddings endpoint. If no embedding model is loaded, search still works through SQLite full-text search, but semantic search and `related_notes` are unavailable.
+
+For LM Studio, load an embedding model such as `nomic-embed-text-v1.5`, start the local server, then add these env vars to the same MCP config:
+
+```json
+"env": {
+  "OBSIDIAN_MCP_BRIDGE_URL": "http://127.0.0.1:27125",
+  "OBSIDIAN_MCP_TOKEN": "PASTE_TOKEN_FROM_OBSIDIAN_PLUGIN",
+  "OBSIDIAN_MCP_EMBEDDINGS": "on",
+  "OBSIDIAN_MCP_EMBEDDING_BASE_URL": "http://127.0.0.1:1234/v1",
+  "OBSIDIAN_MCP_EMBEDDING_MODEL": "nomic-embed-text-v1.5"
+}
+```
+
+Claude Desktop works the same way: it launches the local MCP server, and that server can call LM Studio's local embedding endpoint if these env vars are configured. Claude model calls are still cloud-side, but embedding calls stay local when they point to LM Studio.
+
+See [LM Studio with embeddings](docs/lm-studio-embeddings.md) for the longer setup guide.
+
+### Example prompts
+
+Without embeddings, ask for exact words, paths, tags, folders, and known topics:
+
+- “What notes do I have in my vault?”
+- “Find notes tagged `#project`.”
+- “Search my vault for `meeting notes`.”
+- “Read `Projects/Roadmap.md` and summarize it.”
+- “Show backlinks and outgoing links for `Ideas/Local AI.md`.”
+
+With embeddings enabled, you can ask more conceptual questions because the MCP has a dedicated `ask_vault` tool and semantic search can find related ideas even when the exact words differ:
+
+- “Search my vault with semantic search for recurring themes.”
+- “Find notes related to long-term planning, even if they do not use those words.”
+- “What themes keep repeating across my notes about work and focus?”
+- “What are the common themes across my notes?”
+- “Which notes are conceptually similar to `Ideas/Local AI.md`?”
+- “Find notes that might help me make sense of this project direction.”
+- “Summarize the main ideas in my vault about learning, memory, and writing.”
 
 ## Vault Scope & Exclusions
 
@@ -110,6 +150,12 @@ The plugin scans the vault through Obsidian and shows detected folders, files, a
 
 After changing exclusions, click **Refresh preview** in the plugin settings, then run `refresh_index` from your MCP host so the SQLite index reflects the new scope.
 
+When you add or edit notes later, ask your MCP client to refresh the index:
+
+> “Refresh the vault index.”
+
+This calls `refresh_index`, updates SQLite, and refreshes embeddings too if they are enabled.
+
 ## MCP Tools
 
 | Tool | Description |
@@ -117,6 +163,8 @@ After changing exclusions, click **Refresh preview** in the plugin settings, the
 | `vault_status` | Plugin version, vault name, included note count, scope summary |
 | `refresh_index` | Rebuild the SQLite index (and embeddings if enabled) |
 | `index_status` | Index freshness, row counts, embedding state |
+| `ask_vault` | Default tool for natural vault questions; uses embeddings automatically when available |
+| `analyze_vault` | Find candidate notes/snippets for themes, patterns, and vault-wide synthesis |
 | `list_notes` | Paginated list of included notes with metadata |
 | `search_vault` | Full-text (or semantic) search across the vault |
 | `read_note` | Full content of a note by path |

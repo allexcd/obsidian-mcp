@@ -6,6 +6,7 @@ import type {
   SearchResult,
   VaultNote
 } from "@obsidian-mcp/shared";
+import { requestJson } from "./http-json.js";
 
 export class BridgeClient {
   constructor(
@@ -46,23 +47,18 @@ export class BridgeClient {
       throw new Error("OBSIDIAN_MCP_TOKEN is required. Copy it from the Obsidian plugin settings.");
     }
     const url = new URL(path, this.baseUrl);
-    const response = await fetch(url, {
-      method: "POST",
+    const response = await requestJson<{ error?: string } & T>(url, {
       headers: {
-        Authorization: `Bearer ${this.token}`,
-        "Content-Type": "application/json",
-        Accept: "application/json"
+        Authorization: `Bearer ${this.token}`
       },
-      body: JSON.stringify(body)
+      body
     });
 
-    const text = await response.text();
-    const parsed = text ? (JSON.parse(text) as unknown) : {};
     if (!response.ok) {
+      const parsed = response.body;
       const message = typeof parsed === "object" && parsed && "error" in parsed ? String(parsed.error) : response.statusText;
       throw new Error(`Obsidian bridge ${response.status}: ${message}`);
     }
-    return parsed as T;
+    return response.body;
   }
 }
-

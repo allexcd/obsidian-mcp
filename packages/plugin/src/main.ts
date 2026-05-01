@@ -39,14 +39,14 @@ export default class ObsidianMcpPlugin extends Plugin {
 
     this.addCommand({
       id: "restart-bridge",
-      name: "Restart local MCP bridge",
+      name: "Restart local mcp bridge",
       callback: () => {
         void this.restartBridge();
       }
     });
 
     if (!Platform.isDesktopApp) {
-      new Notice("MCP Vault Bridge is desktop-only.");
+      new Notice("Mcp vault bridge is desktop-only.");
       return;
     }
 
@@ -54,21 +54,21 @@ export default class ObsidianMcpPlugin extends Plugin {
       await this.ensureToken();
     } catch (error) {
       console.error("Unable to initialize MCP bridge token", error);
-      new Notice("MCP Vault Bridge could not access Obsidian SecretStorage.");
+      new Notice("Mcp vault bridge could not access Obsidian secretstorage.");
       return;
     }
 
     this.app.workspace.onLayoutReady(() => {
       ensureInstalledRuntimeFiles(this).catch((error: unknown) => {
         console.error("Unable to materialize MCP runtime files", error);
-        new Notice("MCP Vault Bridge could not create local runtime files. Check plugin folder permissions.");
+        new Notice("Mcp vault bridge could not create local runtime files. Check plugin folder permissions.");
       });
       void this.startBridge();
     });
   }
 
-  async onunload(): Promise<void> {
-    await this.stopBridge();
+  onunload(): void {
+    void this.stopBridge();
   }
 
   async loadSettings(): Promise<void> {

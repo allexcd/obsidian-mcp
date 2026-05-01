@@ -77,8 +77,8 @@ interface CommandStatus {
 
 interface NodeFsPromises {
   access(path: string): Promise<void>;
-  readFile(path: string, encoding: BufferEncoding): Promise<string>;
-  writeFile(path: string, data: string, encoding: BufferEncoding): Promise<void>;
+  readFile(path: string, encoding: "utf8"): Promise<string>;
+  writeFile(path: string, data: string, encoding: "utf8"): Promise<void>;
 }
 
 interface NodePath {
@@ -88,7 +88,7 @@ interface NodePath {
 interface ExecFileOptions {
   cwd?: string;
   timeout?: number;
-  encoding?: BufferEncoding;
+  encoding?: "utf8";
   windowsHide?: boolean;
   env?: NodeJS.ProcessEnv;
 }
@@ -193,12 +193,12 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
           await installRuntimeDependencies(this.plugin);
           const status = await getRuntimeStatus(this.plugin, true);
           updateRuntimeSetupRow(runtimeRow, status);
-          new Notice("SQLite runtime dependencies installed.");
+          new Notice("Sqlite runtime dependencies installed.");
         } catch (error) {
           console.error("Unable to install MCP runtime dependencies", error);
           const status = await getRuntimeStatus(this.plugin, true);
           updateRuntimeSetupRow(runtimeRow, status);
-          new Notice("Could not install SQLite runtime. Check Node.js, npm, network access, and the developer console.");
+          new Notice("Could not install sqlite runtime. Check Node.js, npm, network access, and the developer console.");
         }
       });
     });
@@ -259,10 +259,10 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
         await copyText(token);
         updateSetupRow(tokenRow, "Ready", "good", `${tokenFingerprint(token)} in ${this.plugin.getTokenStorageLabel()}. Not regenerated.`);
         await flashButton(button, "Copied", "Copy token");
-        new Notice("MCP bridge token copied. It was not regenerated.");
+        new Notice("Mcp bridge token copied. It was not regenerated.");
       } catch (error) {
         console.error("Unable to copy MCP token", error);
-        new Notice("Could not copy MCP bridge token.");
+        new Notice("Could not copy mcp bridge token.");
       }
     });
     addSetupButton(tokenRow.actionsEl, "Regenerate", "rotate-cw", async (button) => {
@@ -270,10 +270,10 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
         const token = await this.plugin.regenerateToken();
         updateSetupRow(tokenRow, "Ready", "good", `${tokenFingerprint(token)} in ${this.plugin.getTokenStorageLabel()}. Update every MCP host config.`);
         await flashButton(button, "Regenerated", "Regenerate");
-        new Notice("MCP bridge token regenerated. Update MCP host configs.");
+        new Notice("Mcp bridge token regenerated. Update mcp host configs.");
       } catch (error) {
         console.error("Unable to regenerate MCP token", error);
-        new Notice("Could not regenerate MCP bridge token.");
+        new Notice("Could not regenerate mcp bridge token.");
       }
     });
     void this.plugin
@@ -301,10 +301,10 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
       serverPath ? "Copy a JSON-safe config for your MCP client." : "Plugin folder unavailable in this vault adapter."
     );
     addSetupButton(clientRow.actionsEl, "Copy LM Studio", "copy", async (button) => {
-      await this.copyClientConfig("lm-studio", button);
+      await this.copyClientConfig(button, false);
     });
     addSetupButton(clientRow.actionsEl, "Copy Claude", "copy", async (button) => {
-      await this.copyClientConfig("claude", button);
+      await this.copyClientConfig(button, false);
     });
 
     const vaultRow = createSetupRow(
@@ -313,16 +313,21 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
       "Vault access",
       `${preview.includedNoteCount} included`,
       "good",
-      `${preview.excludedNoteCount} excluded. Protected folders such as .obsidian, .trash, .git, and hidden paths are always denied.`
+      `${preview.excludedNoteCount} excluded. Protected and hidden folders are always denied.`
     );
-    addSetupButton(vaultRow.actionsEl, "Folders", "folder", async () => {
+    addSetupButton(vaultRow.actionsEl, "Folders", "folder", () => {
       new ExclusionManagerModal(this.app, this.plugin, "folder", () => this.display()).open();
     });
-    addSetupButton(vaultRow.actionsEl, "Tags", "tag", async () => {
+    addSetupButton(vaultRow.actionsEl, "Tags", "tag", () => {
       new ExclusionManagerModal(this.app, this.plugin, "tag", () => this.display()).open();
     });
-    addSetupButton(vaultRow.actionsEl, "Files", "file", async () => {
+    addSetupButton(vaultRow.actionsEl, "Files", "file", () => {
       new ExclusionManagerModal(this.app, this.plugin, "file", () => this.display()).open();
+    });
+
+    section.createEl("p", {
+      text: 'After adding notes or changing exclusions, ask your mcp client: "Refresh the vault index."',
+      cls: "obsidian-mcp-muted obsidian-mcp-compact-note"
     });
   }
 
@@ -366,7 +371,7 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
     }
 
     section.createEl("p", {
-      text: `${preview.includedNoteCount} notes are currently exposed to MCP tools; ${preview.excludedNoteCount} are denied. Protected folders such as .obsidian, .trash, .git, and hidden paths are always denied.`,
+      text: `${preview.includedNoteCount} notes are currently exposed to MCP tools; ${preview.excludedNoteCount} are denied. Protected and hidden folders are always denied.`,
       cls: "obsidian-mcp-muted obsidian-mcp-compact-note"
     });
   }
@@ -374,7 +379,7 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
   private renderScopeCard(containerEl: HTMLElement, summary: ScopeSummary): void {
     const card = containerEl.createDiv({ cls: "obsidian-mcp-scope-card" });
     const header = card.createDiv({ cls: "obsidian-mcp-card-header" });
-    header.createEl("h4", { text: summary.label });
+    header.createDiv({ text: summary.label, cls: "obsidian-mcp-card-title" });
     header.createSpan({ text: `${summary.total} detected`, cls: "obsidian-mcp-chip obsidian-mcp-chip-neutral" });
     card.createEl("p", { text: summary.description, cls: "obsidian-mcp-muted" });
 
@@ -413,14 +418,14 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
 
     const path = getMcpServerPath(this.plugin);
     const pathBlock = section.createDiv({ cls: "obsidian-mcp-path-block" });
-    pathBlock.createEl("span", { text: "Server path", cls: "obsidian-mcp-label" });
+    pathBlock.createSpan({ text: "Server path", cls: "obsidian-mcp-label" });
     pathBlock.createEl("code", {
       text: path ?? "Plugin folder unavailable in this vault adapter.",
       cls: "obsidian-mcp-code"
     });
 
     new Setting(section)
-      .setName("MCP server path")
+      .setName("Mcp server path")
       .setDesc("Use this exact absolute path as the first value in args.")
       .addButton((button) =>
         button
@@ -433,20 +438,25 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
               }
               await copyText(serverPath);
               await flashButton(button, "Copied", "Copy path");
-              new Notice("MCP server path copied.");
+              new Notice("Mcp server path copied.");
             } catch (error) {
               console.error("Unable to copy MCP server path", error);
-              new Notice("Could not copy MCP server path.");
+              new Notice("Could not copy mcp server path.");
             }
           })
       );
 
+    const keyNote = section.createEl("p", { cls: "obsidian-mcp-muted obsidian-mcp-compact-note" });
+    keyNote.appendText("The default server key is ");
+    keyNote.createEl("code").setText(["obsidian", "vault"].join("-"));
+    keyNote.appendText(". It is only the mcp client name, and you can rename it if you use multiple vaults.");
+
     const snippets = section.createDiv({ cls: "obsidian-mcp-config-actions" });
-    createConfigPreview(snippets, "LM Studio mcp.json", buildClientConfig(this.plugin, "lm-studio"), async (button) => {
-      await this.copyClientConfig("lm-studio", button);
+    createConfigPreview(snippets, "Mcp client config", buildClientConfig(this.plugin, false), async (button) => {
+      await this.copyClientConfig(button, false);
     });
-    createConfigPreview(snippets, "Claude Desktop", buildClientConfig(this.plugin, "claude"), async (button) => {
-      await this.copyClientConfig("claude", button);
+    createConfigPreview(snippets, "Mcp client config with embeddings", buildClientConfig(this.plugin, true), async (button) => {
+      await this.copyClientConfig(button, true);
     });
   }
 
@@ -454,7 +464,7 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
     const details = containerEl.createEl("details", { cls: "obsidian-mcp-runtime-details" });
     details.createEl("summary", { text: "Runtime diagnostics" });
     details.createEl("p", {
-      text: "Detailed runtime checks for troubleshooting Node.js, npm, mcp-server.cjs, and the SQLite runtime.",
+      text: "Detailed runtime checks for troubleshooting Node.js, npm, mcp-server.cjs, and the sqlite runtime.",
       cls: "obsidian-mcp-muted"
     });
 
@@ -475,7 +485,7 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
 
     new Setting(details)
       .setName("Runtime diagnostics")
-      .setDesc("Checks mcp-server.cjs, the SQLite runtime, and whether node/npm are visible from Obsidian.")
+      .setDesc("Checks mcp-server.cjs, the sqlite runtime, and whether node/npm are visible from Obsidian.")
       .addButton((button) =>
         button
           .setButtonText("Check runtime")
@@ -487,17 +497,17 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
       )
       .addButton((button) =>
         button
-          .setButtonText("Install SQLite runtime")
+          .setButtonText("Install sqlite runtime")
           .onClick(async () => {
-            await withBusyButton(button, "Installing", "Install SQLite runtime", async () => {
+            await withBusyButton(button, "Installing", "Install sqlite runtime", async () => {
               try {
                 await installRuntimeDependencies(this.plugin);
                 await refreshRuntime(true);
-                new Notice("SQLite runtime dependencies installed.");
+                new Notice("Sqlite runtime dependencies installed.");
               } catch (error) {
                 console.error("Unable to install MCP runtime dependencies", error);
                 await refreshRuntime(true);
-                new Notice("Could not install SQLite runtime. Check Node.js, npm, network access, and the developer console.");
+                new Notice("Could not install sqlite runtime. Check Node.js, npm, network access, and the developer console.");
               }
             });
           })
@@ -521,7 +531,7 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Loopback port")
-      .setDesc("The MCP adapter connects to this local port.")
+      .setDesc("The mcp adapter connects to this local port.")
       .addText((text) =>
         text
           .setPlaceholder("27125")
@@ -537,7 +547,7 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Maximum note bytes")
-      .setDesc("Caps note content returned to the MCP adapter.")
+      .setDesc("Caps note content returned to the mcp adapter.")
       .addText((text) =>
         text.setValue(String(this.plugin.settings.maxNoteBytes)).onChange(async (value) => {
           const max = Number(value);
@@ -560,7 +570,7 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Node.js command override")
-      .setDesc("Optional fallback when direct and shell-based detection cannot find Node.js. Leave empty unless Check runtime still fails.")
+      .setDesc("Optional fallback when direct and shell-based detection cannot find Node.js. Leave empty unless check runtime still fails.")
       .addText((text) =>
         text
           .setPlaceholder("/absolute/path/to/node")
@@ -573,7 +583,7 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("npm command override")
-      .setDesc("Optional fallback when direct and shell-based detection cannot find npm. Leave empty unless Install SQLite runtime still fails.")
+      .setDesc("Optional fallback when direct and shell-based detection cannot find npm. Leave empty unless install sqlite runtime still fails.")
       .addText((text) =>
         text
           .setPlaceholder("/absolute/path/to/npm")
@@ -587,14 +597,14 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
     this.renderRuntimeDiagnostics(section);
   }
 
-  private async copyClientConfig(kind: "lm-studio" | "claude", button: ButtonComponent): Promise<void> {
+  private async copyClientConfig(button: ButtonComponent, embeddings: boolean): Promise<void> {
     try {
-      await copyText(buildClientConfig(this.plugin, kind));
-      await flashButton(button, "Copied", kind === "lm-studio" ? "Copy LM Studio config" : "Copy Claude config");
-      new Notice(kind === "lm-studio" ? "LM Studio MCP config copied." : "Claude Desktop MCP config copied.");
+      await copyText(buildClientConfig(this.plugin, embeddings));
+      await flashButton(button, "Copied", "Copy config");
+      new Notice(embeddings ? "Mcp config with embeddings copied." : "Mcp config copied.");
     } catch (error) {
       console.error("Unable to copy MCP client config", error);
-      new Notice("Could not copy MCP client config.");
+      new Notice("Could not copy mcp client config.");
     }
   }
 }
@@ -646,7 +656,7 @@ class ExclusionManagerModal extends Modal {
 
     const chips = block.createDiv({ cls: "obsidian-mcp-chip-list" });
     if (values.length === 0) {
-      chips.createEl("span", { text: "Nothing excluded yet.", cls: "obsidian-mcp-muted" });
+      chips.createSpan({ text: "Nothing excluded yet.", cls: "obsidian-mcp-muted" });
       return;
     }
 
@@ -758,7 +768,7 @@ class ExclusionManagerModal extends Modal {
     if (this.kind === "folder") {
       const childCount = immediateFolderChildren(this.preview.detectedFolders, value).length;
       if (childCount > 0) {
-        info.createEl("span", { text: `${childCount} child folders`, cls: "obsidian-mcp-muted" });
+        info.createSpan({ text: `${childCount} child folders`, cls: "obsidian-mcp-muted" });
       }
     }
 
@@ -880,9 +890,9 @@ export function buildVaultScopePreview(plugin: ObsidianMcpPlugin): VaultScopePre
 
 function renderHeader(containerEl: HTMLElement): void {
   const header = containerEl.createDiv({ cls: "obsidian-mcp-header" });
-  header.createEl("h2", { text: "MCP Vault Bridge" });
+  header.createDiv({ text: "Mcp vault bridge", cls: "obsidian-mcp-title" });
   header.createEl("p", {
-    text: "Expose your vault to local MCP clients through a read-only bridge. Returned note snippets can be sent to the model provider used by that client, so keep private areas excluded.",
+    text: "Expose your vault to local mcp clients through a read-only bridge. Returned note snippets can be sent to the model provider used by that client, so keep private areas excluded.",
     cls: "obsidian-mcp-muted"
   });
 }
@@ -935,8 +945,8 @@ function updateSetupRow(row: SetupRowHandle, badge: string, tone: StatusTone, de
 function addSetupButton(
   containerEl: HTMLElement,
   label: string,
-  icon: string,
-  onClick: (button: ButtonComponent) => Promise<void>
+  _icon: string,
+  onClick: (button: ButtonComponent) => void | Promise<void>
 ): void {
   new Setting(containerEl)
     .setClass("obsidian-mcp-setup-action-setting")
@@ -1011,7 +1021,7 @@ function renderRuntimeStatus(element: HTMLElement, status: RuntimeStatus): void 
 }
 
 function renderStatusRow(containerEl: HTMLElement, label: string, value: string): void {
-  const row = containerEl.createEl("div", { cls: "obsidian-mcp-runtime-row" });
+  const row = containerEl.createDiv({ cls: "obsidian-mcp-runtime-row" });
   row.createSpan({ text: `${label}: ` });
   row.createEl("code", { text: value, cls: "obsidian-mcp-code" });
 }
@@ -1033,33 +1043,48 @@ function extractTags(plugin: ObsidianMcpPlugin, path: string): string[] {
   }
   const cache = plugin.app.metadataCache.getFileCache(file);
   const direct = cache?.tags?.map((tag) => tag.tag.replace(/^#/, "").toLowerCase()) ?? [];
-  const frontmatterTags = cache?.frontmatter?.tags;
-  const fromFrontmatter = Array.isArray(frontmatterTags)
-    ? frontmatterTags.filter((tag): tag is string => typeof tag === "string")
-    : typeof frontmatterTags === "string"
-      ? frontmatterTags.split(/[,\s]+/)
-      : [];
+  const fromFrontmatter = stringList(readRecordValue(cache?.frontmatter, "tags"));
   return Array.from(new Set([...direct, ...fromFrontmatter].map((tag) => tag.replace(/^#/, "").toLowerCase()).filter(Boolean)));
 }
 
-function buildClientConfig(plugin: ObsidianMcpPlugin, kind: "lm-studio" | "claude"): string {
-  const mcpServerPath = getMcpServerPath(plugin) ?? "/ABSOLUTE/PATH/TO/Your Vault/.obsidian/plugins/mcp-vault-bridge/mcp-server.cjs";
+function readRecordValue(record: unknown, key: string): unknown {
+  if (!record || typeof record !== "object") {
+    return undefined;
+  }
+  return (record as Record<string, unknown>)[key];
+}
+
+function stringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === "string");
+  }
+  if (typeof value === "string") {
+    return value.split(/[,\s]+/);
+  }
+  return [];
+}
+
+function buildClientConfig(plugin: ObsidianMcpPlugin, embeddings: boolean): string {
+  const mcpServerPath =
+    getMcpServerPath(plugin) ?? "/ABSOLUTE/PATH/TO/Your Vault/CONFIG_DIR/plugins/mcp-vault-bridge/mcp-server.cjs";
+  const env: Record<string, string> = {
+    OBSIDIAN_MCP_BRIDGE_URL: `http://127.0.0.1:${plugin.settings.port}`,
+    OBSIDIAN_MCP_TOKEN: "PASTE_TOKEN_FROM_OBSIDIAN_PLUGIN"
+  };
+  if (embeddings) {
+    env.OBSIDIAN_MCP_EMBEDDINGS = "on";
+    env.OBSIDIAN_MCP_EMBEDDING_BASE_URL = "http://127.0.0.1:1234/v1";
+    env.OBSIDIAN_MCP_EMBEDDING_MODEL = "nomic-embed-text-v1.5";
+  }
   const baseConfig = {
     mcpServers: {
       "obsidian-vault": {
         command: plugin.settings.nodeCommandOverride.trim() || "node",
         args: [mcpServerPath],
-        env: {
-          OBSIDIAN_MCP_BRIDGE_URL: `http://127.0.0.1:${plugin.settings.port}`,
-          OBSIDIAN_MCP_TOKEN: "PASTE_TOKEN_FROM_OBSIDIAN_PLUGIN"
-        }
+        env
       }
     }
   };
-
-  if (kind === "lm-studio") {
-    return JSON.stringify(baseConfig, null, 2);
-  }
 
   return JSON.stringify(baseConfig, null, 2);
 }
@@ -1291,7 +1316,7 @@ export async function ensureInstalledRuntimeFiles(plugin: ObsidianMcpPlugin): Pr
     throw new Error("Node.js filesystem modules are not available inside Obsidian.");
   }
 
-  await materializeRuntimeFiles(pluginDirectory, fs, path);
+  await materializeRuntimeFiles(pluginDirectory, fs, path, plugin.manifest.version);
 }
 
 async function installRuntimeDependencies(plugin: ObsidianMcpPlugin): Promise<void> {
@@ -1326,7 +1351,7 @@ function getPluginFilesystemDirectory(plugin: ObsidianMcpPlugin): string | null 
     return null;
   }
 
-  const pluginVaultPath = plugin.manifest.dir ?? `.obsidian/plugins/${plugin.manifest.id}`;
+  const pluginVaultPath = plugin.manifest.dir ?? `${plugin.app.vault.configDir}/plugins/${plugin.manifest.id}`;
   return joinFilesystemPath(adapter.getBasePath(), pluginVaultPath);
 }
 
@@ -1579,11 +1604,7 @@ async function copyText(text: string): Promise<void> {
     }
   }
 
-  if (copyWithHiddenTextarea(text)) {
-    return;
-  }
-
-  const requireFn = (globalThis as unknown as { require?: (module: string) => unknown }).require;
+  const requireFn = (window as unknown as { require?: (module: string) => unknown }).require;
   if (requireFn) {
     const electron = requireFn("electron") as { clipboard?: { writeText(value: string): void } };
     if (electron.clipboard?.writeText) {
@@ -1595,26 +1616,10 @@ async function copyText(text: string): Promise<void> {
   throw new Error("No clipboard API is available.");
 }
 
-function copyWithHiddenTextarea(text: string): boolean {
-  const textarea = document.body.createEl("textarea");
-  textarea.value = text;
-  textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
-  textarea.style.top = "0";
-  textarea.setAttr("readonly", "true");
-  textarea.select();
-  try {
-    return document.execCommand("copy");
-  } finally {
-    textarea.remove();
-  }
-}
-
 function loadNodeModule<T>(moduleName: string): T | null {
   try {
-    const globalRequire = (globalThis as unknown as { require?: (module: string) => unknown }).require;
-    const requireFn = globalRequire ?? (new Function("return require")() as (module: string) => unknown);
-    return requireFn(moduleName) as T;
+    const requireFn = (window as unknown as { require?: (module: string) => unknown }).require;
+    return requireFn ? (requireFn(moduleName) as T) : null;
   } catch {
     return null;
   }

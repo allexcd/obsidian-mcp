@@ -22,12 +22,13 @@ class MemoryFs implements RuntimeFs {
 const path = {
   join: (...parts: string[]) => parts.join("/")
 };
+const runtimeVersion = "0.4.2";
 
 describe("runtime file materialization", () => {
   it("writes mcp-server.cjs and package.json when missing", async () => {
     const fs = new MemoryFs();
 
-    const result = await materializeRuntimeFiles("/plugin", fs, path);
+    const result = await materializeRuntimeFiles("/plugin", fs, path, runtimeVersion);
 
     expect(result).toMatchObject({
       mcpServerPath: "/plugin/mcp-server.cjs",
@@ -36,15 +37,15 @@ describe("runtime file materialization", () => {
       wrotePackageJson: true
     });
     expect(fs.files.get("/plugin/mcp-server.cjs")).toContain("MCP server launcher");
-    expect(fs.files.get("/plugin/package.json")).toBe(runtimePackageJsonText());
+    expect(fs.files.get("/plugin/package.json")).toBe(runtimePackageJsonText(runtimeVersion));
   });
 
   it("rewrites stale mcp-server.cjs without rewriting unchanged package.json", async () => {
     const fs = new MemoryFs();
     fs.files.set("/plugin/mcp-server.cjs", "old");
-    fs.files.set("/plugin/package.json", runtimePackageJsonText());
+    fs.files.set("/plugin/package.json", runtimePackageJsonText(runtimeVersion));
 
-    const result = await materializeRuntimeFiles("/plugin", fs, path);
+    const result = await materializeRuntimeFiles("/plugin", fs, path, runtimeVersion);
 
     expect(result.wroteMcpServer).toBe(true);
     expect(result.wrotePackageJson).toBe(false);
@@ -53,10 +54,10 @@ describe("runtime file materialization", () => {
 
   it("does not rewrite files that already match", async () => {
     const fs = new MemoryFs();
-    await materializeRuntimeFiles("/plugin", fs, path);
+    await materializeRuntimeFiles("/plugin", fs, path, runtimeVersion);
     fs.writes = 0;
 
-    const result = await materializeRuntimeFiles("/plugin", fs, path);
+    const result = await materializeRuntimeFiles("/plugin", fs, path, runtimeVersion);
 
     expect(result.wroteMcpServer).toBe(false);
     expect(result.wrotePackageJson).toBe(false);

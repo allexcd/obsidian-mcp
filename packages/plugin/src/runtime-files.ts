@@ -7,8 +7,8 @@ export const RUNTIME_DEPENDENCIES = {
 };
 
 export interface RuntimeFs {
-  readFile(path: string, encoding: BufferEncoding): Promise<string>;
-  writeFile(path: string, data: string, encoding: BufferEncoding): Promise<void>;
+  readFile(path: string, encoding: "utf8"): Promise<string>;
+  writeFile(path: string, data: string, encoding: "utf8"): Promise<void>;
 }
 
 export interface RuntimePath {
@@ -25,7 +25,8 @@ export interface RuntimeMaterializationResult {
 export async function materializeRuntimeFiles(
   pluginDirectory: string,
   fs: RuntimeFs,
-  path: RuntimePath
+  path: RuntimePath,
+  version = "0.0.0"
 ): Promise<RuntimeMaterializationResult> {
   if (!MCP_SERVER_CJS.trim()) {
     throw new Error("The embedded MCP server payload is empty. Rebuild the plugin package.");
@@ -34,7 +35,7 @@ export async function materializeRuntimeFiles(
   const mcpServerPath = path.join(pluginDirectory, "mcp-server.cjs");
   const packageJsonPath = path.join(pluginDirectory, "package.json");
   const wroteMcpServer = await writeIfChanged(fs, mcpServerPath, MCP_SERVER_CJS);
-  const wrotePackageJson = await writeIfChanged(fs, packageJsonPath, runtimePackageJsonText());
+  const wrotePackageJson = await writeIfChanged(fs, packageJsonPath, runtimePackageJsonText(version));
 
   return {
     mcpServerPath,
@@ -44,11 +45,11 @@ export async function materializeRuntimeFiles(
   };
 }
 
-export function runtimePackageJsonText(): string {
+export function runtimePackageJsonText(version = "0.0.0"): string {
   return `${JSON.stringify(
     {
       name: "mcp-vault-bridge-runtime",
-      version: "0.1.0",
+      version,
       private: true,
       description: "Runtime dependencies for the MCP Vault Bridge server materialized by the Obsidian plugin.",
       dependencies: RUNTIME_DEPENDENCIES

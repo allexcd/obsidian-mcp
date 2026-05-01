@@ -37,7 +37,7 @@ const sampleNote: VaultNote = {
 describe("VaultIndexer", () => {
   it("refreshes an empty index on demand", async () => {
     let noteCount = 0;
-    const bridge = createBridge();
+    const { bridge, exportNotes } = createBridge();
     const db = createDb(() => noteCount, (notes) => {
       noteCount = notes.length;
     });
@@ -46,35 +46,37 @@ describe("VaultIndexer", () => {
     const result = await indexer.refreshIfEmpty();
 
     expect(result).toEqual({ indexedNotes: 1, embeddingChunks: 0 });
-    expect(bridge.exportNotes).toHaveBeenCalledOnce();
+    expect(exportNotes).toHaveBeenCalledOnce();
     expect(indexer.status()).toMatchObject({ indexing: false, lastError: null });
   });
 
   it("does not refresh a non-empty index from refreshIfEmpty", async () => {
-    const bridge = createBridge();
+    const { bridge, exportNotes } = createBridge();
     const indexer = new VaultIndexer(bridge, createDb(() => 1), createEmbeddings());
 
     const result = await indexer.refreshIfEmpty();
 
     expect(result).toBeNull();
-    expect(bridge.exportNotes).not.toHaveBeenCalled();
+    expect(exportNotes).not.toHaveBeenCalled();
   });
 
   it("deduplicates concurrent refreshes", async () => {
-    const bridge = createBridge();
+    const { bridge, exportNotes } = createBridge();
     const indexer = new VaultIndexer(bridge, createDb(() => 0), createEmbeddings());
 
     const [left, right] = await Promise.all([indexer.refresh(), indexer.refresh()]);
 
     expect(left).toEqual(right);
-    expect(bridge.exportNotes).toHaveBeenCalledOnce();
+    expect(exportNotes).toHaveBeenCalledOnce();
   });
 });
 
-function createBridge(): BridgeClient {
+function createBridge(): { bridge: BridgeClient; exportNotes: ReturnType<typeof vi.fn> } {
+  const exportNotes = vi.fn(() => Promise.resolve({ notes: [sampleNote], nextOffset: null }));
   return {
-    exportNotes: vi.fn(async () => ({ notes: [sampleNote], nextOffset: null }))
-  } as unknown as BridgeClient;
+    bridge: { exportNotes } as unknown as BridgeClient,
+    exportNotes
+  };
 }
 
 function createDb(getNoteCount: () => number, onReplace: (notes: VaultNote[]) => void = () => undefined): VaultDatabase {

@@ -13,6 +13,11 @@ const LOCK_PATH = path.join(ROOT, 'package-lock.json');
 const ROOT_MANIFEST_PATH = path.join(ROOT, 'manifest.json');
 const PLUGIN_MANIFEST_PATH = path.join(ROOT, 'packages', 'plugin', 'manifest.json');
 const VERSIONS_PATH = path.join(ROOT, 'versions.json');
+const WORKSPACE_PACKAGE_PATHS = [
+  path.join(ROOT, 'packages', 'shared', 'package.json'),
+  path.join(ROOT, 'packages', 'mcp-server', 'package.json'),
+  path.join(ROOT, 'packages', 'plugin', 'package.json')
+];
 const BUMP_TYPES = new Set(['patch', 'minor', 'major']);
 
 function run(command, args = [], opts = {}) {
@@ -189,15 +194,24 @@ async function main() {
   pluginManifest.version = next;
   writeJson(PLUGIN_MANIFEST_PATH, pluginManifest);
 
+  for (const workspacePackagePath of WORKSPACE_PACKAGE_PATHS) {
+    const workspacePackage = readJson(workspacePackagePath);
+    workspacePackage.version = next;
+    if (workspacePackage.dependencies && workspacePackage.dependencies['@obsidian-mcp/shared']) {
+      workspacePackage.dependencies['@obsidian-mcp/shared'] = next;
+    }
+    writeJson(workspacePackagePath, workspacePackage);
+  }
+
   const versions = fs.existsSync(VERSIONS_PATH) ? readJson(VERSIONS_PATH) : {};
   versions[next] = minAppVersion;
   writeJson(VERSIONS_PATH, versions);
 
   if (fs.existsSync(LOCK_PATH)) {
     run('npm', ['install', '--package-lock-only', '--ignore-scripts']);
-    console.log(`  OK package.json + package-lock.json + manifest.json + plugin manifest + versions.json -> ${next}`);
+    console.log(`  OK package.json + package-lock.json + manifests + workspace packages + versions.json -> ${next}`);
   } else {
-    console.log(`  OK package.json + manifest.json + plugin manifest + versions.json -> ${next}`);
+    console.log(`  OK package.json + manifests + workspace packages + versions.json -> ${next}`);
   }
 
   console.log('\n  Running npm run build to verify the bundle is clean...');
@@ -220,6 +234,9 @@ async function main() {
     'package.json',
     'manifest.json',
     'packages/plugin/manifest.json',
+    'packages/shared/package.json',
+    'packages/mcp-server/package.json',
+    'packages/plugin/package.json',
     'versions.json'
   ];
   if (fs.existsSync(LOCK_PATH)) {

@@ -7,7 +7,9 @@
   margin-bottom: var(--size-4-4);
 }
 
-.obsidian-mcp-header h2 {
+.obsidian-mcp-title {
+  font-size: var(--h2-size);
+  font-weight: var(--h2-weight);
   margin-bottom: var(--size-2-2);
 }
 
@@ -97,7 +99,7 @@
 
 .obsidian-mcp-section-heading h3,
 .obsidian-mcp-section-heading p,
-.obsidian-mcp-card-header h4,
+.obsidian-mcp-card-title,
 .obsidian-mcp-status-card p,
 .obsidian-mcp-scope-card p,
 .obsidian-mcp-action-copy strong,
@@ -107,6 +109,10 @@
 
 .obsidian-mcp-section-heading p {
   max-width: 48rem;
+}
+
+.obsidian-mcp-card-title {
+  font-weight: var(--font-semibold);
 }
 
 .obsidian-mcp-setup-table {
