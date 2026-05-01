@@ -1,5 +1,6 @@
 import type { EmbeddingConfig } from "./config.js";
 import type { VaultDatabase } from "./database.js";
+import { requestJson } from "./http-json.js";
 
 export class EmbeddingClient {
   constructor(private readonly config: EmbeddingConfig) {}
@@ -20,20 +21,20 @@ export class EmbeddingClient {
     if (!this.enabled || !this.config.baseUrl || !this.config.model) {
       throw new Error("Embeddings are disabled or incomplete.");
     }
-    const response = await fetch(new URL("embeddings", ensureTrailingSlash(this.config.baseUrl)), {
-      method: "POST",
+    const response = await requestJson<{ data?: Array<{ embedding?: number[] }>; error?: { message?: string } }>(
+      new URL("embeddings", ensureTrailingSlash(this.config.baseUrl)),
+      {
       headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
         ...(this.config.apiKey ? { Authorization: `Bearer ${this.config.apiKey}` } : {})
       },
-      body: JSON.stringify({
+      body: {
         model: this.config.model,
         input
-      })
-    });
+      }
+      }
+    );
 
-    const payload = (await response.json()) as { data?: Array<{ embedding?: number[] }>; error?: { message?: string } };
+    const payload = response.body;
     if (!response.ok) {
       throw new Error(payload.error?.message ?? `Embedding request failed with ${response.status}`);
     }

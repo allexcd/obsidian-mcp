@@ -14,7 +14,7 @@ export function titleFromPath(path: string): string {
   return name.replace(/\.md$/i, "");
 }
 
-export function parseMarkdown(path: string, content: string): ParsedMarkdown {
+export function parseMarkdown(_path: string, content: string): ParsedMarkdown {
   const frontmatter = parseFrontmatter(content);
   const aliases = extractAliases(frontmatter);
   const tags = unique([...extractTagsFromFrontmatter(frontmatter), ...extractInlineTags(content)].map(normalizeTag).filter(Boolean));
@@ -237,4 +237,3 @@ function splitLargeText(text: string, maxChars: number): string[] {
   }
   return chunks;
 }
-

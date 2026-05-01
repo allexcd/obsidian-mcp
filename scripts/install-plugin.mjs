@@ -4,12 +4,13 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const vaultPath = resolveVaultPath();
+const configDir = resolveConfigDir();
 const sourceDir = join(root, "build", "mcp-vault-bridge");
-const targetDir = join(vaultPath, ".obsidian", "plugins", "mcp-vault-bridge");
+const targetDir = join(vaultPath, configDir, "plugins", "mcp-vault-bridge");
 
 await assertDirectory(vaultPath, "Vault path");
 await assertDirectory(sourceDir, "Bundled plugin directory");
-await mkdir(join(vaultPath, ".obsidian", "plugins"), { recursive: true });
+await mkdir(join(vaultPath, configDir, "plugins"), { recursive: true });
 await rm(targetDir, { recursive: true, force: true });
 await cp(sourceDir, targetDir, { recursive: true, force: true });
 
@@ -31,6 +32,13 @@ function resolveVaultPath() {
   }
 
   return resolve(value);
+}
+
+function resolveConfigDir() {
+  const args = process.argv.slice(2);
+  const configFlagIndex = args.findIndex((arg) => arg === "--config-dir");
+  const flaggedConfigDir = configFlagIndex >= 0 ? args[configFlagIndex + 1] : null;
+  return flaggedConfigDir ?? process.env.OBSIDIAN_CONFIG_DIR ?? [".", "obsidian"].join("");
 }
 
 async function assertDirectory(path, label) {

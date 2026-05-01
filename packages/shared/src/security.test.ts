@@ -7,9 +7,9 @@ describe("security helpers", () => {
     expect(() => normalizeVaultPath("file:///tmp/secret.md")).toThrow(/URL-style/i);
   });
 
-  it("includes regular markdown by default and denies hidden/config folders", () => {
+  it("includes regular markdown by default and denies hidden folders", () => {
     expect(isPathIncluded("Projects/Plan.md", [], { excludedFolders: [], excludedFiles: [], excludedTags: [] })).toBe(true);
-    expect(isPathIncluded(".obsidian/config.md", [], { excludedFolders: [], excludedFiles: [], excludedTags: [] })).toBe(false);
+    expect(isPathIncluded(".config-folder/config.md", [], { excludedFolders: [], excludedFiles: [], excludedTags: [] })).toBe(false);
     expect(isPathIncluded("Projects/Plan.md", [], { excludedFolders: ["Projects"], excludedFiles: [], excludedTags: [] })).toBe(false);
   });
 

@@ -1,4 +1,4 @@
-import { FileSystemAdapter, type CachedMetadata, type TFile } from "obsidian";
+import { CachedMetadata, FileSystemAdapter, TFile } from "obsidian";
 import {
   clampLimit,
   clampOffset,
@@ -24,8 +24,6 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 export interface BridgeServerHandle {
   close(): Promise<void>;
 }
-
-const BRIDGE_VERSION = "0.1.0";
 
 interface NodeHttp {
   createServer(handler: (req: IncomingMessage, res: ServerResponse) => void): Server;
@@ -112,13 +110,13 @@ async function handleRequest(
 }
 
 async function buildStatus(plugin: ObsidianMcpPlugin): Promise<BridgeStatus> {
-  const files = await getAllowedMarkdownFiles(plugin);
+  const files = getAllowedMarkdownFiles(plugin);
   const pluginDirectory = getPluginDirectory(plugin);
   return {
     ok: true,
     vaultName: plugin.app.vault.getName(),
-    pluginVersion: BRIDGE_VERSION,
-    bridgeVersion: BRIDGE_VERSION,
+    pluginVersion: plugin.manifest.version,
+    bridgeVersion: plugin.manifest.version,
     readOnly: true,
     pluginDirectory,
     scope: normalizeVaultScope(plugin.settings),
@@ -130,7 +128,7 @@ async function buildStatus(plugin: ObsidianMcpPlugin): Promise<BridgeStatus> {
 }
 
 function getPluginDirectory(plugin: ObsidianMcpPlugin): BridgeStatus["pluginDirectory"] {
-  const vaultPath = plugin.manifest.dir ?? `.obsidian/plugins/${plugin.manifest.id}`;
+  const vaultPath = plugin.manifest.dir ?? `${plugin.app.vault.configDir}/plugins/${plugin.manifest.id}`;
   const adapter = plugin.app.vault.adapter;
   if (adapter instanceof FileSystemAdapter) {
     const basePath = adapter.getBasePath();
@@ -151,8 +149,8 @@ function getPluginDirectory(plugin: ObsidianMcpPlugin): BridgeStatus["pluginDire
 async function listNotes(plugin: ObsidianMcpPlugin, body: JsonRecord): Promise<BridgeListResponse> {
   const limit = clampLimit(body.limit);
   const offset = clampOffset(body.offset);
-  const files = await getAllowedMarkdownFiles(plugin);
-  const notes = await Promise.all(files.slice(offset, offset + limit).map((file) => buildSummary(plugin, file)));
+  const files = getAllowedMarkdownFiles(plugin);
+  const notes = files.slice(offset, offset + limit).map((file) => buildSummary(plugin, file));
   return {
     notes,
     nextOffset: offset + limit < files.length ? offset + limit : null
@@ -162,7 +160,7 @@ async function listNotes(plugin: ObsidianMcpPlugin, body: JsonRecord): Promise<B
 async function exportNotes(plugin: ObsidianMcpPlugin, body: JsonRecord): Promise<BridgeExportResponse> {
   const limit = clampLimit(body.limit, 20, 50);
   const offset = clampOffset(body.offset);
-  const files = await getAllowedMarkdownFiles(plugin);
+  const files = getAllowedMarkdownFiles(plugin);
   const notes = await Promise.all(files.slice(offset, offset + limit).map((file) => buildVaultNote(plugin, file)));
   return {
     notes,
@@ -171,12 +169,12 @@ async function exportNotes(plugin: ObsidianMcpPlugin, body: JsonRecord): Promise
 }
 
 async function searchNotes(plugin: ObsidianMcpPlugin, body: JsonRecord): Promise<{ results: SearchResult[] }> {
-  const query = String(body.query ?? "").trim();
+  const query = stringField(body.query).trim();
   const limit = clampLimit(body.limit);
   if (!query) {
     return { results: [] };
   }
-  const files = await getAllowedMarkdownFiles(plugin);
+  const files = getAllowedMarkdownFiles(plugin);
   const results: SearchResult[] = [];
   for (const file of files) {
     const content = await plugin.app.vault.cachedRead(file);
@@ -184,7 +182,7 @@ async function searchNotes(plugin: ObsidianMcpPlugin, body: JsonRecord): Promise
     if (index < 0) {
       continue;
     }
-    const summary = await buildSummary(plugin, file);
+    const summary = buildSummary(plugin, file);
     results.push({
       path: file.path,
       title: summary.title,
@@ -206,9 +204,10 @@ async function routeReadNote(
   route: string,
   body: JsonRecord
 ): Promise<void> {
-  const file = await getAllowedFileByPath(plugin, body.path);
+  const file = getAllowedFileByPath(plugin, body.path);
+  const rawPath = stringField(body.path);
   if (!file) {
-    await plugin.audit({ route, path: String(body.path ?? ""), allowed: false, reason: "denied_or_missing" });
+    await plugin.audit({ route, path: rawPath, allowed: false, reason: "denied_or_missing" });
     sendJson(response, 404, { error: "Allowed note not found." });
     return;
   }
@@ -223,14 +222,15 @@ async function routeMetadata(
   route: string,
   body: JsonRecord
 ): Promise<void> {
-  const file = await getAllowedFileByPath(plugin, body.path);
+  const file = getAllowedFileByPath(plugin, body.path);
+  const rawPath = stringField(body.path);
   if (!file) {
-    await plugin.audit({ route, path: String(body.path ?? ""), allowed: false, reason: "denied_or_missing" });
+    await plugin.audit({ route, path: rawPath, allowed: false, reason: "denied_or_missing" });
     sendJson(response, 404, { error: "Allowed note not found." });
     return;
   }
   await plugin.audit({ route, path: file.path, allowed: true });
-  sendJson(response, 200, await buildMetadata(plugin, file));
+  sendJson(response, 200, buildMetadata(plugin, file));
 }
 
 async function routeLinks(
@@ -239,13 +239,14 @@ async function routeLinks(
   route: string,
   body: JsonRecord
 ): Promise<void> {
-  const file = await getAllowedFileByPath(plugin, body.path);
+  const file = getAllowedFileByPath(plugin, body.path);
+  const rawPath = stringField(body.path);
   if (!file) {
-    await plugin.audit({ route, path: String(body.path ?? ""), allowed: false, reason: "denied_or_missing" });
+    await plugin.audit({ route, path: rawPath, allowed: false, reason: "denied_or_missing" });
     sendJson(response, 404, { error: "Allowed note not found." });
     return;
   }
-  const metadata = await buildMetadata(plugin, file);
+  const metadata = buildMetadata(plugin, file);
   await plugin.audit({ route, path: file.path, allowed: true });
   sendJson(response, 200, {
     path: file.path,
@@ -255,7 +256,7 @@ async function routeLinks(
   });
 }
 
-async function getAllowedMarkdownFiles(plugin: ObsidianMcpPlugin): Promise<TFile[]> {
+function getAllowedMarkdownFiles(plugin: ObsidianMcpPlugin): TFile[] {
   const files = plugin.app.vault
     .getMarkdownFiles()
     .filter((file) => isAllowedFile(plugin, file))
@@ -263,7 +264,7 @@ async function getAllowedMarkdownFiles(plugin: ObsidianMcpPlugin): Promise<TFile
   return files;
 }
 
-async function getAllowedFileByPath(plugin: ObsidianMcpPlugin, rawPath: unknown): Promise<TFile | null> {
+function getAllowedFileByPath(plugin: ObsidianMcpPlugin, rawPath: unknown): TFile | null {
   if (typeof rawPath !== "string") {
     return null;
   }
@@ -274,11 +275,10 @@ async function getAllowedFileByPath(plugin: ObsidianMcpPlugin, rawPath: unknown)
     return null;
   }
   const abstract = plugin.app.vault.getAbstractFileByPath(normalized);
-  if (!abstract || !("extension" in abstract) || abstract.extension !== "md") {
+  if (!(abstract instanceof TFile) || abstract.extension !== "md") {
     return null;
   }
-  const file = abstract as TFile;
-  return isAllowedFile(plugin, file) ? file : null;
+  return isAllowedFile(plugin, abstract) ? abstract : null;
 }
 
 function isAllowedFile(plugin: ObsidianMcpPlugin, file: TFile): boolean {
@@ -287,8 +287,8 @@ function isAllowedFile(plugin: ObsidianMcpPlugin, file: TFile): boolean {
   return isPathIncluded(file.path, tags, plugin.settings);
 }
 
-async function buildSummary(plugin: ObsidianMcpPlugin, file: TFile): Promise<VaultNoteSummary> {
-  const metadata = await buildMetadata(plugin, file);
+function buildSummary(plugin: ObsidianMcpPlugin, file: TFile): VaultNoteSummary {
+  const metadata = buildMetadata(plugin, file);
   return {
     path: file.path,
     title: metadata.title,
@@ -303,7 +303,7 @@ async function buildSummary(plugin: ObsidianMcpPlugin, file: TFile): Promise<Vau
 async function buildVaultNote(plugin: ObsidianMcpPlugin, file: TFile, maxBytes = plugin.settings.maxNoteBytes): Promise<VaultNote> {
   const content = await plugin.app.vault.cachedRead(file);
   const truncated = truncateText(content, maxBytes);
-  const metadata = await buildMetadata(plugin, file, content);
+  const metadata = buildMetadata(plugin, file, content);
   return {
     path: file.path,
     title: metadata.title,
@@ -318,11 +318,11 @@ async function buildVaultNote(plugin: ObsidianMcpPlugin, file: TFile, maxBytes =
   };
 }
 
-async function buildMetadata(plugin: ObsidianMcpPlugin, file: TFile, content?: string): Promise<NoteMetadata> {
+function buildMetadata(plugin: ObsidianMcpPlugin, file: TFile, content?: string): NoteMetadata {
   const cache = plugin.app.metadataCache.getFileCache(file);
   const parsed = content ? parseMarkdown(file.path, content) : null;
   const cacheTags = extractCacheTags(cache);
-  const frontmatter = (cache?.frontmatter as Record<string, never> | undefined) ?? parsed?.frontmatter ?? {};
+  const frontmatter = cache?.frontmatter ?? parsed?.frontmatter ?? {};
   const tags = Array.from(new Set([...(parsed?.tags ?? []), ...cacheTags])).sort();
   const aliases = extractAliases(cache, parsed?.aliases ?? []);
   const outlinks = extractOutlinks(cache, parsed?.wikilinks ?? []);
@@ -350,22 +350,12 @@ async function buildMetadata(plugin: ObsidianMcpPlugin, file: TFile, content?: s
 
 function extractCacheTags(cache: CachedMetadata | null): string[] {
   const direct = cache?.tags?.map((tag) => tag.tag.replace(/^#/, "")) ?? [];
-  const frontmatterTags = cache?.frontmatter?.tags;
-  const fm = Array.isArray(frontmatterTags)
-    ? frontmatterTags.filter((tag): tag is string => typeof tag === "string")
-    : typeof frontmatterTags === "string"
-      ? frontmatterTags.split(/[,\s]+/)
-      : [];
+  const fm = stringList(cache?.frontmatter?.tags);
   return Array.from(new Set([...direct, ...fm].map((tag) => tag.replace(/^#/, "").toLowerCase()).filter(Boolean))).sort();
 }
 
 function extractAliases(cache: CachedMetadata | null, parsedAliases: string[]): string[] {
-  const aliases = cache?.frontmatter?.aliases ?? cache?.frontmatter?.alias;
-  const cacheAliases = Array.isArray(aliases)
-    ? aliases.filter((alias): alias is string => typeof alias === "string")
-    : typeof aliases === "string"
-      ? [aliases]
-      : [];
+  const cacheAliases = stringList(cache?.frontmatter?.aliases ?? cache?.frontmatter?.alias);
   return Array.from(new Set([...cacheAliases, ...parsedAliases])).sort();
 }
 
@@ -380,7 +370,7 @@ function extractEmbeds(cache: CachedMetadata | null, parsedEmbeds: string[]): st
 }
 
 function extractBacklinks(plugin: ObsidianMcpPlugin, file: TFile): string[] {
-  const resolvedLinks = plugin.app.metadataCache.resolvedLinks as Record<string, Record<string, number>>;
+  const resolvedLinks = plugin.app.metadataCache.resolvedLinks;
   return Object.entries(resolvedLinks)
     .filter(([source, targets]) => source !== file.path && targets[file.path] && isAllowedPathOnly(plugin, source))
     .map(([source]) => source)
@@ -389,10 +379,10 @@ function extractBacklinks(plugin: ObsidianMcpPlugin, file: TFile): string[] {
 
 function isAllowedPathOnly(plugin: ObsidianMcpPlugin, path: string): boolean {
   const abstract = plugin.app.vault.getAbstractFileByPath(path);
-  if (!abstract || !("extension" in abstract) || abstract.extension !== "md") {
+  if (!(abstract instanceof TFile) || abstract.extension !== "md") {
     return false;
   }
-  return isAllowedFile(plugin, abstract as TFile);
+  return isAllowedFile(plugin, abstract);
 }
 
 function isAuthorized(request: IncomingMessage, token: string): boolean {
@@ -401,7 +391,7 @@ function isAuthorized(request: IncomingMessage, token: string): boolean {
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<JsonRecord> {
-  const chunks: Buffer[] = [];
+  const chunks: Uint8Array[] = [];
   let total = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
@@ -425,9 +415,21 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
   response.end(JSON.stringify(body));
 }
 
+function stringField(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function stringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+  return typeof value === "string" ? value.split(/[,\s]+/) : [];
+}
+
 function loadNodeHttp(): NodeHttp {
-  const requireFn =
-    (globalThis as unknown as { require?: (module: string) => unknown }).require ??
-    (new Function("return require")() as (module: string) => unknown);
+  const requireFn = (window as unknown as { require?: (module: string) => unknown }).require;
+  if (!requireFn) {
+    throw new Error("Node require is not available in Obsidian desktop.");
+  }
   return requireFn("http") as NodeHttp;
 }

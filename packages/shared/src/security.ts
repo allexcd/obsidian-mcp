@@ -5,7 +5,7 @@ export const DEFAULT_MAX_TOOL_TEXT_BYTES = 24_000;
 export const DEFAULT_PAGE_LIMIT = 20;
 export const MAX_PAGE_LIMIT = 100;
 
-const ALWAYS_DENIED_SEGMENTS = new Set([".obsidian", ".trash", ".git"]);
+const ALWAYS_DENIED_SEGMENTS = new Set([".trash", ".git"]);
 
 export function normalizeVaultPath(input: string): string {
   const raw = input.trim().replace(/\\/g, "/");

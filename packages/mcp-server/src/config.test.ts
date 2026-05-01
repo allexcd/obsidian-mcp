@@ -29,16 +29,16 @@ describe("loadConfig", () => {
   it("resolves the default database path from the Obsidian plugin folder", async () => {
     const config = loadConfig({ OBSIDIAN_MCP_TOKEN: "token" });
     const resolved = await resolveRuntimeConfig(config, {
-      status: async () => ({
+      status: () => Promise.resolve({
         ok: true,
         vaultName: "Test",
-        pluginVersion: "0.1.0",
-        bridgeVersion: "0.1.0",
+        pluginVersion: "0.4.2",
+        bridgeVersion: "0.4.2",
         readOnly: true,
         pluginDirectory: {
-          vaultPath: ".obsidian/plugins/mcp-vault-bridge",
-          filesystemPath: "/vault/.obsidian/plugins/mcp-vault-bridge",
-          defaultDatabasePath: "/vault/.obsidian/plugins/mcp-vault-bridge/index.sqlite"
+          vaultPath: "custom-config/plugins/mcp-vault-bridge",
+          filesystemPath: "/vault/custom-config/plugins/mcp-vault-bridge",
+          defaultDatabasePath: "/vault/custom-config/plugins/mcp-vault-bridge/index.sqlite"
         },
         scope: { excludedFolders: [], excludedFiles: [], excludedTags: [] },
         vaultPreview: {
@@ -54,16 +54,14 @@ describe("loadConfig", () => {
       })
     } as never);
 
-    expect(resolved.dbPath).toBe("/vault/.obsidian/plugins/mcp-vault-bridge/index.sqlite");
+    expect(resolved.dbPath).toBe("/vault/custom-config/plugins/mcp-vault-bridge/index.sqlite");
     expect(resolved.dbPathSource).toBe("bridge");
   });
 
   it("keeps explicit database paths", async () => {
     const config = loadConfig({ OBSIDIAN_MCP_DB: "/tmp/custom.sqlite" });
     const resolved = await resolveRuntimeConfig(config, {
-      status: async () => {
-        throw new Error("should not be called");
-      }
+      status: () => Promise.reject(new Error("should not be called"))
     } as never);
 
     expect(resolved.dbPath).toBe("/tmp/custom.sqlite");
