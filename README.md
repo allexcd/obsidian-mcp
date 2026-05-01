@@ -23,8 +23,8 @@ Vault content returned by MCP tools may be forwarded to the model by the host. C
 
 ### End users
 
-1. Download the latest `mcp-vault-bridge-X.Y.Z.zip` from the [Releases](https://github.com/allexcd/obsidian-mcp/releases) page.
-2. Unzip and copy the complete `mcp-vault-bridge` folder into your vault:
+1. Install **MCP Vault Bridge** from Obsidian Community Plugins, or download the latest `mcp-vault-bridge-X.Y.Z.zip` from the [Releases](https://github.com/allexcd/obsidian-mcp/releases) page.
+2. For zip installs, unzip and copy the `mcp-vault-bridge` folder into your vault:
    ```text
    Your Vault/.obsidian/plugins/mcp-vault-bridge/
    ```
@@ -32,12 +32,13 @@ Vault content returned by MCP tools may be forwarded to the model by the host. C
 4. Open the plugin settings, click **Check runtime**, then **Install SQLite runtime**.
 
 > Node.js 20+ and npm must be available for the runtime install step. If they are missing the settings screen will say so.
+> Obsidian installs only `manifest.json`, `main.js`, and `styles.css`. When the plugin is enabled it creates the local `mcp-server.cjs` and runtime `package.json` inside its installed plugin folder. `node_modules` is created only when you click **Install SQLite runtime**.
 
 ### From source
 
 ```bash
 npm install
-npm run build   # builds all packages + the standalone plugin folder
+npm run build   # builds all packages + the community-plugin-shaped plugin folder
 npm test        # runs the test suite
 ```
 

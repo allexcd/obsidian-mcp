@@ -4,7 +4,8 @@ import { resolve } from "node:path";
 export default defineConfig({
   resolve: {
     alias: {
-      "@obsidian-mcp/shared": resolve("packages/shared/src/index.ts")
+      "@obsidian-mcp/shared": resolve("packages/shared/src/index.ts"),
+      "virtual:mcp-server-payload": resolve("packages/plugin/src/test-mcp-server-payload.ts")
     }
   },
   test: {

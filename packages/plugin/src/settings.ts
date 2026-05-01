@@ -19,6 +19,7 @@ import {
   type VaultScopePreview
 } from "@obsidian-mcp/shared";
 import type ObsidianMcpPlugin from "./main.js";
+import { materializeRuntimeFiles } from "./runtime-files.js";
 
 export interface ObsidianMcpSettings {
   bridgeEnabled: boolean;
@@ -46,12 +47,6 @@ export const DEFAULT_SETTINGS: ObsidianMcpSettings = {
   npmCommandOverride: ""
 };
 
-const RUNTIME_DEPENDENCIES = {
-  "better-sqlite3": "12.9.0",
-  bindings: "1.5.0",
-  "file-uri-to-path": "1.0.0"
-};
-
 const SEARCH_RESULT_LIMIT = 40;
 const GITHUB_REPO_URL = "https://github.com/allexcd/obsidian-mcp";
 
@@ -65,6 +60,7 @@ interface RuntimeStatus {
   sqliteRuntimePath: string | null;
   mcpServerPresent: boolean;
   sqliteRuntimePresent: boolean;
+  runtimeFilesError?: string;
   nodeCommand?: CommandStatus;
   npmCommand?: CommandStatus;
 }
@@ -81,6 +77,7 @@ interface CommandStatus {
 
 interface NodeFsPromises {
   access(path: string): Promise<void>;
+  readFile(path: string, encoding: BufferEncoding): Promise<string>;
   writeFile(path: string, data: string, encoding: BufferEncoding): Promise<void>;
 }
 
@@ -954,6 +951,9 @@ function updateRuntimeSetupRow(row: SetupRowHandle, status: RuntimeStatus): void
 }
 
 function runtimeSetupDetail(status: RuntimeStatus): string {
+  if (status.runtimeFilesError) {
+    return `Could not create runtime files: ${status.runtimeFilesError}`;
+  }
   const server = status.mcpServerPresent ? "mcp-server.cjs found" : "mcp-server.cjs missing";
   const sqlite = status.sqliteRuntimePresent ? "SQLite runtime found" : "SQLite runtime missing";
   const commands =
@@ -991,6 +991,9 @@ function renderRuntimeStatus(element: HTMLElement, status: RuntimeStatus): void 
   }
 
   renderStatusRow(element, "Plugin folder", status.pluginDirectory);
+  if (status.runtimeFilesError) {
+    renderStatusRow(element, "Runtime files", status.runtimeFilesError);
+  }
   renderStatusRow(element, "MCP server", status.mcpServerPresent ? "found" : "missing");
   if (status.mcpServerPath) {
     renderStatusRow(element, "MCP path", status.mcpServerPath);
@@ -1001,7 +1004,7 @@ function renderRuntimeStatus(element: HTMLElement, status: RuntimeStatus): void 
 
   if (!status.mcpServerPresent || !status.sqliteRuntimePresent) {
     element.createEl("p", {
-      text: "If SQLite runtime is missing, click Install SQLite runtime. If mcp-server.cjs is missing, reinstall the complete mcp-vault-bridge plugin folder.",
+      text: "If SQLite runtime is missing, click Install SQLite runtime. If mcp-server.cjs is missing, click Check runtime to let the plugin repair local runtime files.",
       cls: "obsidian-mcp-muted"
     });
   }
@@ -1245,6 +1248,15 @@ function tokenFingerprint(token: string): string {
 
 async function getRuntimeStatus(plugin: ObsidianMcpPlugin, includeCommands: boolean): Promise<RuntimeStatus> {
   const pluginDirectory = getPluginFilesystemDirectory(plugin);
+  let runtimeFilesError: string | undefined;
+  if (pluginDirectory) {
+    try {
+      await ensureInstalledRuntimeFiles(plugin);
+    } catch (error) {
+      runtimeFilesError = error instanceof Error ? error.message : String(error);
+      console.error("Unable to materialize MCP runtime files", error);
+    }
+  }
   const mcpServerPath = getMcpServerPath(plugin);
   const sqliteRuntimePath = pluginDirectory
     ? joinFilesystemPath(pluginDirectory, "node_modules", "better-sqlite3", "build", "Release", "better_sqlite3.node")
@@ -1255,7 +1267,8 @@ async function getRuntimeStatus(plugin: ObsidianMcpPlugin, includeCommands: bool
     mcpServerPath,
     sqliteRuntimePath,
     mcpServerPresent: mcpServerPath ? await fileExists(mcpServerPath) : false,
-    sqliteRuntimePresent: sqliteRuntimePath ? await fileExists(sqliteRuntimePath) : false
+    sqliteRuntimePresent: sqliteRuntimePath ? await fileExists(sqliteRuntimePath) : false,
+    runtimeFilesError
   };
 
   if (includeCommands) {
@@ -1264,6 +1277,21 @@ async function getRuntimeStatus(plugin: ObsidianMcpPlugin, includeCommands: bool
   }
 
   return status;
+}
+
+export async function ensureInstalledRuntimeFiles(plugin: ObsidianMcpPlugin): Promise<void> {
+  const pluginDirectory = getPluginFilesystemDirectory(plugin);
+  if (!pluginDirectory) {
+    throw new Error("Plugin folder is not available through the filesystem adapter.");
+  }
+
+  const fs = loadNodeModule<NodeFsPromises>("fs/promises");
+  const path = loadNodeModule<NodePath>("path");
+  if (!fs || !path) {
+    throw new Error("Node.js filesystem modules are not available inside Obsidian.");
+  }
+
+  await materializeRuntimeFiles(pluginDirectory, fs, path);
 }
 
 async function installRuntimeDependencies(plugin: ObsidianMcpPlugin): Promise<void> {
@@ -1277,7 +1305,7 @@ async function installRuntimeDependencies(plugin: ObsidianMcpPlugin): Promise<vo
     throw new Error(`npm is not available: ${npmStatus.detail}`);
   }
 
-  await writeRuntimePackageJson(pluginDirectory);
+  await ensureInstalledRuntimeFiles(plugin);
   const result = await execFileAsync(
     npmStatus.command ?? "npm",
     ["install", "--omit=dev", "--no-audit", "--fund=false", "--package-lock=false"],
@@ -1326,29 +1354,6 @@ async function fileExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-async function writeRuntimePackageJson(pluginDirectory: string): Promise<void> {
-  const fs = loadNodeModule<NodeFsPromises>("fs/promises");
-  if (!fs) {
-    throw new Error("fs/promises is not available.");
-  }
-
-  await fs.writeFile(
-    joinFilesystemPath(pluginDirectory, "package.json"),
-    `${JSON.stringify(
-      {
-        name: "mcp-vault-bridge-runtime",
-        version: "0.1.0",
-        private: true,
-        description: "Runtime dependencies for the MCP Vault Bridge server bundled inside the Obsidian plugin.",
-        dependencies: RUNTIME_DEPENDENCIES
-      },
-      null,
-      2
-    )}\n`,
-    "utf8"
-  );
 }
 
 async function resolveRuntimeCommand(
@@ -1520,6 +1525,9 @@ function runtimeSummary(status: RuntimeStatus): string {
   if (!status.pluginDirectory) {
     return "Plugin folder unavailable. Use Obsidian desktop with a filesystem vault.";
   }
+  if (status.runtimeFilesError) {
+    return "Could not create MCP runtime files. Check plugin folder permissions and the developer console.";
+  }
   if (status.mcpServerPresent && status.sqliteRuntimePresent && status.nodeCommand?.ok && status.npmCommand?.ok) {
     return "Runtime is ready.";
   }
@@ -1530,7 +1538,7 @@ function runtimeSummary(status: RuntimeStatus): string {
     return "SQLite runtime is missing. Click Install SQLite runtime.";
   }
   if (!status.mcpServerPresent) {
-    return "mcp-server.cjs is missing. Reinstall the complete plugin folder.";
+    return "mcp-server.cjs is missing. Click Check runtime to repair local runtime files.";
   }
   return "Runtime check complete.";
 }
