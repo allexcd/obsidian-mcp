@@ -15,8 +15,8 @@ await mkdir(buildDir, { recursive: true });
 await rm(archivePath, { force: true });
 await run("zip", ["-r", archivePath, "mcp-vault-bridge"], buildDir);
 
-console.log(`Standalone Obsidian plugin archive: ${archivePath}`);
-console.log("Archive created without node_modules. Users need Node.js, npm, and network access to install runtime dependencies from plugin settings.");
+console.log(`Community-plugin-shaped Obsidian plugin archive: ${archivePath}`);
+console.log("Archive contains only manifest.json, main.js, and styles.css. Runtime files are materialized by the plugin after install.");
 
 async function assertDirectory(path, label) {
   try {

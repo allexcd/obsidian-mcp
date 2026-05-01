@@ -1,7 +1,12 @@
 import { Notice, Platform, Plugin } from "obsidian";
 import type { BridgeAuditEntry } from "@obsidian-mcp/shared";
 import { createBridgeServer, type BridgeServerHandle } from "./server.js";
-import { DEFAULT_SETTINGS, ObsidianMcpSettingTab, type ObsidianMcpSettings } from "./settings.js";
+import {
+  DEFAULT_SETTINGS,
+  ensureInstalledRuntimeFiles,
+  ObsidianMcpSettingTab,
+  type ObsidianMcpSettings
+} from "./settings.js";
 
 interface SecretStorageLike {
   getSecret(name: string): string | null | Promise<string | null>;
@@ -54,6 +59,10 @@ export default class ObsidianMcpPlugin extends Plugin {
     }
 
     this.app.workspace.onLayoutReady(() => {
+      ensureInstalledRuntimeFiles(this).catch((error: unknown) => {
+        console.error("Unable to materialize MCP runtime files", error);
+        new Notice("MCP Vault Bridge could not create local runtime files. Check plugin folder permissions.");
+      });
       void this.startBridge();
     });
   }

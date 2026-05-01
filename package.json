@@ -19,8 +19,8 @@
   "scripts": {
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "clean": "node scripts/clean.mjs",
-    "build": "npm run build --workspace @obsidian-mcp/shared && npm run build --workspace @obsidian-mcp/mcp-server && npm run build --workspace @obsidian-mcp/plugin && node scripts/bundle-mcp-server.mjs && node scripts/bundle-plugin.mjs",
-    "plugin:bundle": "npm run build --workspace @obsidian-mcp/shared && npm run build --workspace @obsidian-mcp/mcp-server && npm run build --workspace @obsidian-mcp/plugin && node scripts/bundle-mcp-server.mjs && node scripts/bundle-plugin.mjs",
+    "build": "npm run build --workspace @obsidian-mcp/shared && npm run build --workspace @obsidian-mcp/mcp-server && node scripts/bundle-mcp-server.mjs && npm run build --workspace @obsidian-mcp/plugin && node scripts/bundle-plugin.mjs",
+    "plugin:bundle": "npm run build --workspace @obsidian-mcp/shared && npm run build --workspace @obsidian-mcp/mcp-server && node scripts/bundle-mcp-server.mjs && npm run build --workspace @obsidian-mcp/plugin && node scripts/bundle-plugin.mjs",
     "plugin:package": "npm run plugin:bundle && node scripts/package-plugin.mjs",
     "plugin:install": "npm run plugin:bundle && node scripts/install-plugin.mjs",
     "lint": "eslint packages scripts",
