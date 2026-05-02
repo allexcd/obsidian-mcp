@@ -73,7 +73,8 @@ export default class ObsidianMcpPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     const data = (await this.loadData()) as PersistedPluginData | null;
-    const { auditLog, fallbackToken, installId, ...settings } = data ?? {};
+    const { fallbackToken, installId, ...settings } = data ?? {};
+    delete settings.auditLog;
     this.settings = { ...DEFAULT_SETTINGS, ...settings };
     this.auditLog = Array.isArray(data?.auditLog) ? data.auditLog.slice(-100) : [];
     this.fallbackToken = typeof fallbackToken === "string" ? fallbackToken : null;

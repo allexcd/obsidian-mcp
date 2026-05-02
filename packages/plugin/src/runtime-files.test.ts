@@ -5,17 +5,18 @@ class MemoryFs implements RuntimeFs {
   readonly files = new Map<string, string>();
   writes = 0;
 
-  async readFile(path: string): Promise<string> {
+  readFile(path: string): Promise<string> {
     const value = this.files.get(path);
     if (value === undefined) {
-      throw new Error("missing");
+      return Promise.reject(new Error("missing"));
     }
-    return value;
+    return Promise.resolve(value);
   }
 
-  async writeFile(path: string, data: string): Promise<void> {
+  writeFile(path: string, data: string): Promise<void> {
     this.files.set(path, data);
     this.writes += 1;
+    return Promise.resolve();
   }
 }
 

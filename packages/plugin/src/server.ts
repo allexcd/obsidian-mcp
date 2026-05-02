@@ -1,4 +1,4 @@
-import { CachedMetadata, FileSystemAdapter, TFile } from "obsidian";
+import { FileSystemAdapter, TFile } from "obsidian";
 import {
   clampLimit,
   clampOffset,
@@ -12,6 +12,7 @@ import {
   type BridgeExportResponse,
   type BridgeListResponse,
   type BridgeStatus,
+  type JsonValue,
   type NoteMetadata,
   type SearchResult,
   type VaultNote,
@@ -30,6 +31,13 @@ interface NodeHttp {
 }
 
 type JsonRecord = Record<string, unknown>;
+
+interface BridgeCache {
+  tags?: { tag: string }[];
+  frontmatter?: Record<string, JsonValue>;
+  links?: { link: string }[];
+  embeds?: { link: string }[];
+}
 
 export async function createBridgeServer(plugin: ObsidianMcpPlugin, token: string): Promise<BridgeServerHandle> {
   const http = loadNodeHttp();
@@ -79,11 +87,11 @@ async function handleRequest(
 
   switch (route) {
     case "/status":
-      sendJson(response, 200, await buildStatus(plugin));
+      sendJson(response, 200, buildStatus(plugin));
       await plugin.audit({ route, allowed: true });
       return;
     case "/notes/list":
-      sendJson(response, 200, await listNotes(plugin, body));
+      sendJson(response, 200, listNotes(plugin, body));
       await plugin.audit({ route, allowed: true });
       return;
     case "/notes/export":
@@ -109,7 +117,7 @@ async function handleRequest(
   }
 }
 
-async function buildStatus(plugin: ObsidianMcpPlugin): Promise<BridgeStatus> {
+function buildStatus(plugin: ObsidianMcpPlugin): BridgeStatus {
   const files = getAllowedMarkdownFiles(plugin);
   const pluginDirectory = getPluginDirectory(plugin);
   return {
@@ -146,7 +154,7 @@ function getPluginDirectory(plugin: ObsidianMcpPlugin): BridgeStatus["pluginDire
   };
 }
 
-async function listNotes(plugin: ObsidianMcpPlugin, body: JsonRecord): Promise<BridgeListResponse> {
+function listNotes(plugin: ObsidianMcpPlugin, body: JsonRecord): BridgeListResponse {
   const limit = clampLimit(body.limit);
   const offset = clampOffset(body.offset);
   const files = getAllowedMarkdownFiles(plugin);
@@ -264,7 +272,7 @@ function getAllowedMarkdownFiles(plugin: ObsidianMcpPlugin): TFile[] {
   return files;
 }
 
-function getAllowedFileByPath(plugin: ObsidianMcpPlugin, rawPath: unknown): TFile | null {
+function getAllowedFileByPath(plugin: ObsidianMcpPlugin, rawPath: unknown) {
   if (typeof rawPath !== "string") {
     return null;
   }
@@ -348,23 +356,23 @@ function buildMetadata(plugin: ObsidianMcpPlugin, file: TFile, content?: string)
   };
 }
 
-function extractCacheTags(cache: CachedMetadata | null): string[] {
+function extractCacheTags(cache: BridgeCache | null): string[] {
   const direct = cache?.tags?.map((tag) => tag.tag.replace(/^#/, "")) ?? [];
   const fm = stringList(cache?.frontmatter?.tags);
   return Array.from(new Set([...direct, ...fm].map((tag) => tag.replace(/^#/, "").toLowerCase()).filter(Boolean))).sort();
 }
 
-function extractAliases(cache: CachedMetadata | null, parsedAliases: string[]): string[] {
+function extractAliases(cache: BridgeCache | null, parsedAliases: string[]): string[] {
   const cacheAliases = stringList(cache?.frontmatter?.aliases ?? cache?.frontmatter?.alias);
   return Array.from(new Set([...cacheAliases, ...parsedAliases])).sort();
 }
 
-function extractOutlinks(cache: CachedMetadata | null, parsedLinks: string[]): string[] {
+function extractOutlinks(cache: BridgeCache | null, parsedLinks: string[]): string[] {
   const cacheLinks = cache?.links?.map((link) => link.link).filter(Boolean) ?? [];
   return Array.from(new Set([...cacheLinks, ...parsedLinks])).sort();
 }
 
-function extractEmbeds(cache: CachedMetadata | null, parsedEmbeds: string[]): string[] {
+function extractEmbeds(cache: BridgeCache | null, parsedEmbeds: string[]): string[] {
   const cacheEmbeds = cache?.embeds?.map((embed) => embed.link).filter(Boolean) ?? [];
   return Array.from(new Set([...cacheEmbeds, ...parsedEmbeds])).sort();
 }
