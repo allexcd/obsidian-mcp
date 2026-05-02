@@ -326,7 +326,7 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
     });
 
     section.createEl("p", {
-      text: 'After adding notes or changing exclusions, ask your mcp client: "Refresh the vault index."',
+      text: "After adding notes or changing exclusions, ask your client to refresh the vault index.",
       cls: "obsidian-mcp-muted obsidian-mcp-compact-note"
     });
   }
@@ -1014,7 +1014,7 @@ function renderRuntimeStatus(element: HTMLElement, status: RuntimeStatus): void 
 
   if (!status.mcpServerPresent || !status.sqliteRuntimePresent) {
     element.createEl("p", {
-      text: "If SQLite runtime is missing, click Install SQLite runtime. If mcp-server.cjs is missing, click Check runtime to let the plugin repair local runtime files.",
+      text: "If the runtime is missing, install it from setup. If the server file is missing, run the runtime check to repair local runtime files.",
       cls: "obsidian-mcp-muted"
     });
   }
