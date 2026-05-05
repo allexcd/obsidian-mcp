@@ -39,7 +39,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.17.24",
     "esbuild": "^0.25.1",
-    "eslint": "^9.18.0",
+    "eslint": "^10.3.0",
     "eslint-plugin-obsidianmd": "^0.2.9",
     "globals": "^15.14.0",
     "typescript": "^5.8.2",
