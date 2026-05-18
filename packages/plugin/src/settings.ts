@@ -28,6 +28,7 @@ export interface ObsidianMcpSettings {
   excludedFiles: string[];
   excludedTags: string[];
   maxNoteBytes: number;
+  writeToolsEnabled: boolean;
   auditEnabled: boolean;
   tokenSecretName: string;
   nodeCommandOverride: string;
@@ -41,6 +42,7 @@ export const DEFAULT_SETTINGS: ObsidianMcpSettings = {
   excludedFiles: [],
   excludedTags: [],
   maxNoteBytes: DEFAULT_MAX_NOTE_BYTES,
+  writeToolsEnabled: false,
   auditEnabled: true,
   tokenSecretName: "obsidian-mcp-bridge-token",
   nodeCommandOverride: "",
@@ -519,12 +521,23 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Enable local bridge")
-      .setDesc("Starts a read-only HTTP bridge on 127.0.0.1 after Obsidian has loaded.")
+      .setDesc("Starts the HTTP bridge on 127.0.0.1 after Obsidian has loaded.")
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.bridgeEnabled).onChange(async (value) => {
           this.plugin.settings.bridgeEnabled = value;
           await this.plugin.saveSettings();
           await this.plugin.restartBridge();
+          this.display();
+        })
+      );
+
+    new Setting(section)
+      .setName("Enable write tools")
+      .setDesc("Allows MCP clients with this bridge token to create and edit non-excluded Markdown notes. Keep disabled unless you trust the connected client.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.writeToolsEnabled).onChange(async (value) => {
+          this.plugin.settings.writeToolsEnabled = value;
+          await this.plugin.saveSettings();
           this.display();
         })
       );
@@ -892,7 +905,7 @@ function renderHeader(containerEl: HTMLElement): void {
   const header = containerEl.createDiv({ cls: "obsidian-mcp-header" });
   header.createDiv({ text: "Mcp vault bridge", cls: "obsidian-mcp-title" });
   header.createEl("p", {
-    text: "Expose your vault to local mcp clients through a read-only bridge. Returned note snippets can be sent to the model provider used by that client, so keep private areas excluded.",
+    text: "Expose your vault to local mcp clients through a read-only-by-default bridge. Returned note snippets can be sent to the model provider used by that client, so keep private areas excluded.",
     cls: "obsidian-mcp-muted"
   });
 }

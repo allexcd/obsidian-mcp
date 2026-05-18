@@ -20,7 +20,8 @@ export interface BridgeStatus {
   vaultName: string;
   pluginVersion: string;
   bridgeVersion: string;
-  readOnly: true;
+  readOnly: boolean;
+  writeToolsEnabled: boolean;
   pluginDirectory: {
     vaultPath: string;
     filesystemPath: string | null;
@@ -99,4 +100,9 @@ export interface BridgeAuditEntry {
   path?: string;
   allowed: boolean;
   reason?: string;
+}
+
+export interface WriteNoteResponse {
+  operation: "create" | "append" | "replace" | "delete_text" | "rewrite";
+  note: VaultNote;
 }

@@ -4,7 +4,8 @@ import type {
   BridgeStatus,
   NoteMetadata,
   SearchResult,
-  VaultNote
+  VaultNote,
+  WriteNoteResponse
 } from "@obsidian-mcp/shared";
 import { requestJson } from "./http-json.js";
 
@@ -40,6 +41,26 @@ export class BridgeClient {
 
   async links(path: string): Promise<{ path: string; outlinks: string[]; embeds: string[]; backlinks: string[] }> {
     return this.request<{ path: string; outlinks: string[]; embeds: string[]; backlinks: string[] }>("/notes/links", { path });
+  }
+
+  async createNote(path: string, content: string, overwrite: boolean): Promise<WriteNoteResponse> {
+    return this.request<WriteNoteResponse>("/notes/create", { path, content, overwrite });
+  }
+
+  async appendNote(path: string, content: string): Promise<WriteNoteResponse> {
+    return this.request<WriteNoteResponse>("/notes/append", { path, content });
+  }
+
+  async replaceNoteText(path: string, oldText: string, newText: string, occurrenceIndex?: number): Promise<WriteNoteResponse> {
+    return this.request<WriteNoteResponse>("/notes/replace", { path, oldText, newText, occurrenceIndex });
+  }
+
+  async deleteNoteText(path: string, text: string, occurrenceIndex?: number): Promise<WriteNoteResponse> {
+    return this.request<WriteNoteResponse>("/notes/delete-text", { path, text, occurrenceIndex });
+  }
+
+  async rewriteNote(path: string, content: string): Promise<WriteNoteResponse> {
+    return this.request<WriteNoteResponse>("/notes/rewrite", { path, content });
   }
 
   private async request<T>(path: string, body: unknown): Promise<T> {

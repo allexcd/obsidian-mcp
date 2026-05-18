@@ -35,6 +35,7 @@ describe("loadConfig", () => {
         pluginVersion: "0.4.2",
         bridgeVersion: "0.4.2",
         readOnly: true,
+        writeToolsEnabled: false,
         pluginDirectory: {
           vaultPath: "custom-config/plugins/mcp-vault-bridge",
           filesystemPath: "/vault/custom-config/plugins/mcp-vault-bridge",

@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import type { SearchResult } from "@obsidian-mcp/shared";
+import type { SearchResult, WriteNoteResponse } from "@obsidian-mcp/shared";
 import type { IndexedNote, IndexStats } from "./database.js";
 import type { McpRuntime } from "./mcp.js";
-import { retrieveVaultQuestion } from "./mcp.js";
+import { indexWrittenNote, retrieveVaultQuestion } from "./mcp.js";
 
 const indexStats: IndexStats = {
   noteCount: 2,
@@ -101,6 +101,36 @@ describe("retrieveVaultQuestion", () => {
   });
 });
 
+describe("indexWrittenNote", () => {
+  it("updates the local note index after a successful write", () => {
+    const upsertNote = vi.fn();
+    const runtime = createRuntime({
+      embeddingsEnabled: false,
+      stats: indexStats,
+      upsertNote
+    });
+
+    const response = createWriteResponse("Notes/New.md");
+    const result = indexWrittenNote(runtime, response);
+
+    expect(upsertNote).toHaveBeenCalledWith(response.note);
+    expect(result.operation).toBe("create");
+    expect(result.hint).toBeUndefined();
+  });
+
+  it("returns an embedding refresh hint when embeddings are enabled", () => {
+    const runtime = createRuntime({
+      embeddingsEnabled: true,
+      stats: indexStats,
+      upsertNote: vi.fn()
+    });
+
+    const result = indexWrittenNote(runtime, createWriteResponse("Notes/New.md"));
+
+    expect(result.hint).toContain("refresh_index");
+  });
+});
+
 function createRuntime(options: {
   embeddingsEnabled: boolean;
   stats: IndexStats;
@@ -108,6 +138,7 @@ function createRuntime(options: {
   searchFts?: () => SearchResult[];
   semanticSearch?: () => SearchResult[];
   listNotes?: () => IndexedNote[];
+  upsertNote?: (note: WriteNoteResponse["note"]) => void;
 }): McpRuntime {
   return {
     config: {
@@ -130,7 +161,8 @@ function createRuntime(options: {
       stats: () => options.stats,
       searchFts: options.searchFts ?? (() => []),
       semanticSearch: options.semanticSearch ?? (() => []),
-      listNotes: options.listNotes ?? (() => [])
+      listNotes: options.listNotes ?? (() => []),
+      upsertNote: options.upsertNote ?? (() => undefined)
     } as unknown as McpRuntime["db"],
     embeddings: {
       enabled: options.embeddingsEnabled,
@@ -141,5 +173,39 @@ function createRuntime(options: {
     indexer: {
       status: () => ({ indexing: false, lastError: null })
     } as unknown as McpRuntime["indexer"]
+  };
+}
+
+function createWriteResponse(path: string): WriteNoteResponse {
+  return {
+    operation: "create",
+    note: {
+      path,
+      title: "New",
+      mtime: 1,
+      size: 7,
+      tags: [],
+      aliases: [],
+      frontmatter: {},
+      content: "content",
+      truncated: false,
+      metadata: {
+        path,
+        title: "New",
+        basename: "New",
+        extension: "md",
+        stat: {
+          ctime: 1,
+          mtime: 1,
+          size: 7
+        },
+        frontmatter: {},
+        tags: [],
+        aliases: [],
+        outlinks: [],
+        embeds: [],
+        backlinks: []
+      }
+    }
   };
 }
