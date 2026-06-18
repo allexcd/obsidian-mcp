@@ -19,12 +19,14 @@ const sdkMock = vi.hoisted(() => {
   return {
     registeredTools,
     connect,
-    McpServer: vi.fn().mockImplementation(() => ({
-      registerTool: vi.fn((name: string, config: ToolConfig, handler: ToolHandler) => {
-        registeredTools.set(name, { config, handler });
-      }),
-      connect
-    })),
+    McpServer: vi.fn().mockImplementation(function () {
+      return {
+        registerTool: vi.fn((name: string, config: ToolConfig, handler: ToolHandler) => {
+          registeredTools.set(name, { config, handler });
+        }),
+        connect
+      };
+    }),
     StdioServerTransport: vi.fn()
   };
 });
