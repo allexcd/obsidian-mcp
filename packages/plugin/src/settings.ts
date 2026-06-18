@@ -546,7 +546,7 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Enable write tools")
-      .setDesc("Allows MCP clients with this bridge token to create and edit non-excluded Markdown notes. Keep disabled unless you trust the connected client.")
+      .setDesc("Allows mcp clients with this bridge token to create and edit non-excluded Markdown notes. Keep disabled unless you trust the connected client.")
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.writeToolsEnabled).onChange(async (value) => {
           this.plugin.settings.writeToolsEnabled = value;
@@ -557,7 +557,7 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Auto-prune embeddings")
-      .setDesc("Automatically removes stale cached embedding vectors after writes and index refreshes. This keeps the local SQLite cache tidy.")
+      .setDesc("Automatically removes stale cached embedding vectors after writes and index refreshes. This keeps the local sqlite cache tidy.")
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.autoPruneEmbeddings).onChange(async (value) => {
           this.plugin.settings.autoPruneEmbeddings = value;

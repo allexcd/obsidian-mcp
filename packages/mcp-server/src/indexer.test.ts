@@ -56,7 +56,7 @@ describe("VaultIndexer", () => {
       }
     });
     expect(exportNotes).toHaveBeenCalledOnce();
-    expect(db.pruneOrphanedEmbeddings).toHaveBeenCalledOnce();
+    expect(mockCalls(db, "pruneOrphanedEmbeddings")).toHaveLength(1);
     expect(indexer.status()).toMatchObject({ indexing: false, lastError: null });
   });
 
@@ -88,7 +88,7 @@ describe("VaultIndexer", () => {
     const result = await indexer.refresh();
 
     expect(result.maintenance).toBeUndefined();
-    expect(db.pruneOrphanedEmbeddings).not.toHaveBeenCalled();
+    expect(mockCalls(db, "pruneOrphanedEmbeddings")).toHaveLength(0);
   });
 });
 
@@ -125,4 +125,8 @@ function createEmbeddings(): EmbeddingClient {
   return {
     enabled: false
   } as EmbeddingClient;
+}
+
+function mockCalls<T extends object>(object: T, key: keyof T): unknown[][] {
+  return (object[key] as { mock: { calls: unknown[][] } }).mock.calls;
 }

@@ -115,7 +115,7 @@ describe("indexWrittenNote", () => {
     const result = indexWrittenNote(runtime, response);
 
     expect(upsertNote).toHaveBeenCalledWith(response.note);
-    expect(runtime.db.pruneOrphanedEmbeddings).toHaveBeenCalledOnce();
+    expect(mockCalls(runtime.db, "pruneOrphanedEmbeddings")).toHaveLength(1);
     expect(result.operation).toBe("create");
     expect(result.maintenance?.prunedEmbeddings).toBe(0);
     expect(result.hint).toBeUndefined();
@@ -143,7 +143,7 @@ describe("indexWrittenNote", () => {
 
     const result = indexWrittenNote(runtime, createWriteResponse("Notes/New.md"));
 
-    expect(runtime.db.pruneOrphanedEmbeddings).not.toHaveBeenCalled();
+    expect(mockCalls(runtime.db, "pruneOrphanedEmbeddings")).toHaveLength(0);
     expect(result.maintenance).toBeUndefined();
     expect(result.hint).toContain("prune_embeddings");
   });
@@ -237,4 +237,8 @@ function createWriteResponse(path: string): WriteNoteResponse {
       }
     }
   };
+}
+
+function mockCalls<T extends object>(object: T, key: keyof T): unknown[][] {
+  return (object[key] as { mock: { calls: unknown[][] } }).mock.calls;
 }

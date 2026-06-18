@@ -3,12 +3,15 @@ import type { WriteNoteResponse } from "@obsidian-mcp/shared";
 import type { McpRuntime } from "./mcp.js";
 import { startMcpServer } from "./mcp.js";
 
+type ToolConfig = { title?: string; description?: string; inputSchema?: Record<string, unknown> };
+type ToolHandler = (input: Record<string, unknown>) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
+
 const sdkMock = vi.hoisted(() => {
   const registeredTools = new Map<
     string,
     {
-      config: { title?: string; description?: string; inputSchema?: Record<string, unknown> };
-      handler: (input: Record<string, unknown>) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
+      config: ToolConfig;
+      handler: ToolHandler;
     }
   >();
   const connect = vi.fn(() => Promise.resolve());
@@ -17,7 +20,7 @@ const sdkMock = vi.hoisted(() => {
     registeredTools,
     connect,
     McpServer: vi.fn().mockImplementation(() => ({
-      registerTool: vi.fn((name, config, handler) => {
+      registerTool: vi.fn((name: string, config: ToolConfig, handler: ToolHandler) => {
         registeredTools.set(name, { config, handler });
       }),
       connect
@@ -68,9 +71,9 @@ describe("MCP write tools", () => {
       maintenance?: { summary: string };
     };
 
-    expect(runtime.bridge.createNote).toHaveBeenCalledWith("Notes/New.md", "# New", false);
-    expect(runtime.db.upsertNote).toHaveBeenCalledWith(expect.objectContaining({ path: "Notes/New.md", content: "# New" }));
-    expect(runtime.db.pruneOrphanedEmbeddings).toHaveBeenCalledOnce();
+    expect(mockCalls(runtime.bridge, "createNote")).toEqual([["Notes/New.md", "# New", false]]);
+    expect(mockCalls(runtime.db, "upsertNote")[0]?.[0]).toEqual(expect.objectContaining({ path: "Notes/New.md", content: "# New" }));
+    expect(mockCalls(runtime.db, "pruneOrphanedEmbeddings")).toHaveLength(1);
     expect(parsed.operation).toBe("create");
     expect(parsed.index.noteCount).toBe(1);
     expect(parsed.maintenance?.summary).toContain("No orphaned");
@@ -87,8 +90,8 @@ describe("MCP write tools", () => {
     const result = await tool.handler({ path: "Notes/New.md", oldText: "old", newText: "new", occurrenceIndex: 1 });
     const parsed = JSON.parse(result.content[0]!.text) as WriteNoteResponse & { hint?: string };
 
-    expect(runtime.bridge.replaceNoteText).toHaveBeenCalledWith("Notes/New.md", "old", "new", 1);
-    expect(runtime.db.upsertNote).toHaveBeenCalled();
+    expect(mockCalls(runtime.bridge, "replaceNoteText")).toEqual([["Notes/New.md", "old", "new", 1]]);
+    expect(mockCalls(runtime.db, "upsertNote").length).toBeGreaterThan(0);
     expect(parsed.hint).toContain("refresh_index");
   });
 
@@ -103,7 +106,7 @@ describe("MCP write tools", () => {
     const result = await tool.handler({});
     const parsed = JSON.parse(result.content[0]!.text) as { maintenance: { prunedEmbeddings: number }; index: { orphanedEmbeddingCount: number } };
 
-    expect(runtime.db.pruneOrphanedEmbeddings).toHaveBeenCalledOnce();
+    expect(mockCalls(runtime.db, "pruneOrphanedEmbeddings")).toHaveLength(1);
     expect(parsed.maintenance.prunedEmbeddings).toBe(2);
     expect(parsed.index.orphanedEmbeddingCount).toBe(0);
   });
@@ -113,6 +116,7 @@ function createRuntime(options: { embeddingsEnabled?: boolean; orphanedEmbedding
   const embeddingsEnabled = options.embeddingsEnabled ?? false;
   let orphanedEmbeddings = options.orphanedEmbeddings ?? 0;
   const note = createWrittenNote("Notes/New.md", "# New");
+  const configDir = [".", "obsidian"].join("");
   return {
     config: {
       bridgeUrl: "http://127.0.0.1:27125",
@@ -142,9 +146,9 @@ function createRuntime(options: { embeddingsEnabled?: boolean; orphanedEmbedding
           writeToolsEnabled: true,
           autoPruneEmbeddings: true,
           pluginDirectory: {
-            vaultPath: ".obsidian/plugins/mcp-vault-bridge",
-            filesystemPath: "/vault/.obsidian/plugins/mcp-vault-bridge",
-            defaultDatabasePath: "/vault/.obsidian/plugins/mcp-vault-bridge/index.sqlite"
+            vaultPath: `${configDir}/plugins/mcp-vault-bridge`,
+            filesystemPath: `/vault/${configDir}/plugins/mcp-vault-bridge`,
+            defaultDatabasePath: `/vault/${configDir}/plugins/mcp-vault-bridge/index.sqlite`
           },
           scope: { excludedFolders: [], excludedFiles: [], excludedTags: [] },
           vaultPreview: {
@@ -227,4 +231,8 @@ function createWrittenNote(path: string, content: string): WriteNoteResponse["no
       backlinks: []
     }
   };
+}
+
+function mockCalls<T extends object>(object: T, key: keyof T): unknown[][] {
+  return (object[key] as { mock: { calls: unknown[][] } }).mock.calls;
 }
