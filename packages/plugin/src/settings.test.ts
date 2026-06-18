@@ -32,7 +32,16 @@ describe("runtime command resolution", () => {
       expect(args[0]).toBe("-lc");
       const script = String(args[1]);
       expect(script).toContain("$HOME/.nvm/versions/node");
+      expect(script).toContain("nvm_current=\"$(nvm current 2>/dev/null || true)\"");
+      expect(script).toContain("append_path \"$node_bin\"");
       expect(script).toContain("/opt/homebrew/bin");
+      expect(script).not.toContain("prepend_path \"$node_bin\"");
+      expectLineBefore(script, "[ -n \"${NVM_BIN:-}\" ]", "find \"$HOME/.nvm/versions/node\"");
+      expectLineBefore(script, "[ -n \"${VOLTA_HOME:-}\" ]", "find \"$HOME/.volta/tools/image/node\"");
+      expectLineBefore(script, "asdf which \"$command_name\"", "find \"$HOME/.asdf/installs/nodejs\"");
+      expectLineBefore(script, "fnm_current=\"$(fnm current 2>/dev/null || true)\"", "find \"$fnm_root/node-versions\"");
+      expectLineBefore(script, "mise which \"$command_name\"", "find \"$HOME/.local/share/mise/installs/node\"");
+      expectLineBefore(script, "brew shellenv", "for brew_root in /opt/homebrew /usr/local /opt/local");
       callback(
         null,
         [
@@ -65,4 +74,10 @@ function createPlugin(): ObsidianMcpPlugin {
       npmCommandOverride: ""
     }
   } as ObsidianMcpPlugin;
+}
+
+function expectLineBefore(script: string, earlier: string, later: string): void {
+  expect(script).toContain(earlier);
+  expect(script).toContain(later);
+  expect(script.indexOf(earlier)).toBeLessThan(script.indexOf(later));
 }
