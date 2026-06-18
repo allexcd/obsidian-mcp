@@ -1,6 +1,6 @@
 {
   "name": "@obsidian-mcp/mcp-server",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "type": "module",
   "bin": {
@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.21.0",
-    "@obsidian-mcp/shared": "0.5.1",
+    "@obsidian-mcp/shared": "0.5.2",
     "better-sqlite3": "^12.2.0",
     "vitest": "4.1.9",
     "zod": "^4.4.3"
