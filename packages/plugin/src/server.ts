@@ -312,6 +312,11 @@ async function routeCreateNote(
     sendJson(response, 413, { error: `Content exceeds maximum note size of ${plugin.settings.maxNoteBytes} bytes.` });
     return;
   }
+  if (!isContentAllowedAfterWrite(plugin, path, content)) {
+    await plugin.audit({ route, path, allowed: false, reason: "post_write_scope_denied" });
+    sendJson(response, 403, { error: "Written note content would be excluded by the current vault scope." });
+    return;
+  }
 
   const existing = plugin.app.vault.getAbstractFileByPath(path);
   const overwrite = booleanField(body.overwrite);
@@ -415,6 +420,11 @@ async function routeMutateExistingNote(
       sendJson(response, 413, { error: `Content exceeds maximum note size of ${plugin.settings.maxNoteBytes} bytes.` });
       return;
     }
+    if (!isContentAllowedAfterWrite(plugin, file.path, next)) {
+      await plugin.audit({ route, path: file.path, allowed: false, reason: "post_write_scope_denied" });
+      sendJson(response, 403, { error: "Written note content would be excluded by the current vault scope." });
+      return;
+    }
     await plugin.app.vault.modify(file, next);
     await sendWriteResponse(plugin, response, route, operation, file, next);
   } catch (error) {
@@ -491,6 +501,11 @@ function isAllowedFile(plugin: ObsidianMcpPlugin, file: TFile): boolean {
   const cache = plugin.app.metadataCache.getFileCache(file);
   const tags = extractCacheTags(cache);
   return isPathIncluded(file.path, tags, plugin.settings);
+}
+
+function isContentAllowedAfterWrite(plugin: ObsidianMcpPlugin, path: string, content: string): boolean {
+  const parsed = parseMarkdown(path, content);
+  return isPathIncluded(path, parsed.tags, plugin.settings);
 }
 
 function buildSummary(plugin: ObsidianMcpPlugin, file: TFile): VaultNoteSummary {

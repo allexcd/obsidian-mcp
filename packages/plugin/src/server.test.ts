@@ -1,5 +1,6 @@
 import { createServer } from "node:net";
 import { request } from "node:http";
+import { TFile } from "obsidian";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type ObsidianMcpPlugin from "./main.js";
 import { createBridgeServer, type BridgeServerHandle } from "./server.js";
@@ -33,6 +34,61 @@ describe("plugin bridge write routes", () => {
       allowed: false,
       reason: "writes_disabled"
     });
+  });
+
+  it("rejects creating content that introduces an excluded tag", async () => {
+    const port = await getFreePort();
+    const { plugin, vault, audit } = createPlugin({ port, excludedTags: ["private"] });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/notes/create", { path: "Notes/New.md", content: "# New\n#private" });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ error: "Written note content would be excluded by the current vault scope." });
+    expect(vault.create.mock.calls).toHaveLength(0);
+    expect(audit).toHaveBeenCalledWith({
+      route: "/notes/create",
+      path: "Notes/New.md",
+      allowed: false,
+      reason: "post_write_scope_denied"
+    });
+  });
+
+  it("rejects rewriting content that introduces an excluded tag", async () => {
+    const port = await getFreePort();
+    const { plugin, vault, file } = createPlugin({
+      port,
+      excludedTags: ["private"],
+      files: [{ path: "Notes/Existing.md", content: "# Existing" }]
+    });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/notes/rewrite", { path: "Notes/Existing.md", content: "# Existing\n#private" });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ error: "Written note content would be excluded by the current vault scope." });
+    expect(vault.modify.mock.calls).toHaveLength(0);
+    expect(file?.content).toBe("# Existing");
+  });
+
+  it("rejects appending content that introduces an excluded tag", async () => {
+    const port = await getFreePort();
+    const { plugin, vault, file } = createPlugin({
+      port,
+      excludedTags: ["private"],
+      files: [{ path: "Notes/Existing.md", content: "# Existing" }]
+    });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/notes/append", { path: "Notes/Existing.md", content: "#private" });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ error: "Written note content would be excluded by the current vault scope." });
+    expect(vault.modify.mock.calls).toHaveLength(0);
+    expect(file?.content).toBe("# Existing");
   });
 });
 
@@ -68,9 +124,49 @@ function postJson(port: number, path: string, body: Record<string, unknown>): Pr
   });
 }
 
-function createPlugin(options: { port: number; writeToolsEnabled: boolean }): { plugin: ObsidianMcpPlugin; audit: ReturnType<typeof vi.fn> } {
+interface TestFile {
+  path: string;
+  content: string;
+  basename: string;
+  extension: string;
+  stat: { ctime: number; mtime: number; size: number };
+}
+
+interface PluginFixture {
+  plugin: ObsidianMcpPlugin;
+  audit: ReturnType<typeof vi.fn>;
+  vault: {
+    create: ReturnType<typeof vi.fn>;
+    modify: ReturnType<typeof vi.fn>;
+  };
+  file: TestFile | undefined;
+}
+
+function createPlugin(
+  options: {
+    port: number;
+    writeToolsEnabled?: boolean;
+    excludedTags?: string[];
+    files?: Array<{ path: string; content: string }>;
+  }
+): PluginFixture {
   const configDir = [".", "obsidian"].join("");
   const audit = vi.fn(() => Promise.resolve());
+  const files = new Map<string, TestFile>();
+  for (const item of options.files ?? []) {
+    files.set(item.path, makeFile(item.path, item.content));
+  }
+  const create = vi.fn((path: string, content: string) => {
+    const file = makeFile(path, content);
+    files.set(path, file);
+    return Promise.resolve(file);
+  });
+  const modify = vi.fn((file: TestFile, content: string) => {
+    file.content = content;
+    file.stat.size = content.length;
+    return Promise.resolve();
+  });
+  const firstFile = files.values().next().value;
   return {
     plugin: {
       manifest: {
@@ -82,9 +178,9 @@ function createPlugin(options: { port: number; writeToolsEnabled: boolean }): { 
         port: options.port,
         excludedFolders: [],
         excludedFiles: [],
-        excludedTags: [],
+        excludedTags: options.excludedTags ?? [],
         maxNoteBytes: 120000,
-        writeToolsEnabled: options.writeToolsEnabled,
+        writeToolsEnabled: options.writeToolsEnabled ?? true,
         autoPruneEmbeddings: true,
         auditEnabled: true,
         tokenSecretName: "obsidian-mcp-bridge-token",
@@ -95,11 +191,11 @@ function createPlugin(options: { port: number; writeToolsEnabled: boolean }): { 
         vault: {
           configDir,
           getName: () => "Test Vault",
-          getMarkdownFiles: () => [],
-          getAbstractFileByPath: () => null,
-          cachedRead: vi.fn(),
-          create: vi.fn(),
-          modify: vi.fn()
+          getMarkdownFiles: () => Array.from(files.values()),
+          getAbstractFileByPath: (path: string) => files.get(path) ?? null,
+          cachedRead: vi.fn((file: TestFile) => Promise.resolve(file.content)),
+          create,
+          modify
         },
         metadataCache: {
           getFileCache: () => null,
@@ -108,8 +204,25 @@ function createPlugin(options: { port: number; writeToolsEnabled: boolean }): { 
       },
       audit
     } as unknown as ObsidianMcpPlugin,
-    audit
+    audit,
+    vault: { create, modify },
+    file: firstFile
   };
+}
+
+function makeFile(path: string, content: string): TestFile {
+  const basename = path.split("/").pop()?.replace(/\.md$/i, "") ?? path;
+  const file = new TFile() as unknown as TestFile;
+  file.path = path;
+  file.content = content;
+  file.basename = basename;
+  file.extension = "md";
+  file.stat = {
+    ctime: 1,
+    mtime: 1,
+    size: content.length
+  };
+  return file;
 }
 
 async function getFreePort(): Promise<number> {
