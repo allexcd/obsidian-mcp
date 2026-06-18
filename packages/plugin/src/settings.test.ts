@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type ObsidianMcpPlugin from "./main.js";
-import { resolveRuntimeCommand } from "./settings.js";
+import { buildClientConfig, resolveClientNodeCommand, resolveRuntimeCommand } from "./settings.js";
 
 describe("runtime command resolution", () => {
   afterEach(() => {
@@ -63,13 +63,68 @@ describe("runtime command resolution", () => {
     });
     expect(status.detail).toContain("v24.14.1");
   });
+
+  it("uses the resolved node command in copied MCP client config", () => {
+    const config = JSON.parse(
+      buildClientConfig(createPlugin(), false, "/Users/alex/.nvm/versions/node/v24.14.1/bin/node")
+    ) as ClientConfig;
+
+    expect(config.mcpServers["obsidian-vault"].command).toBe("/Users/alex/.nvm/versions/node/v24.14.1/bin/node");
+  });
+
+  it("prefers an absolute shell-resolved node for MCP client configs", async () => {
+    vi.stubEnv("HOME", "/Users/alex");
+    vi.stubEnv("SHELL", "/bin/zsh");
+    vi.stubGlobal("window", {
+      require: (moduleName: string) => {
+        if (moduleName !== "child_process") {
+          throw new Error(`Unexpected module ${moduleName}`);
+        }
+        return { execFile };
+      }
+    });
+
+    const execFile = vi.fn((command: string, args: readonly string[], _options: unknown, callback: ExecCallback) => {
+      expect(command).toBe("/bin/zsh");
+      expect(args[0]).toBe("-lc");
+      callback(
+        null,
+        [
+          "__OBSIDIAN_MCP_COMMAND__=/Users/alex/.nvm/versions/node/v24.14.1/bin/node",
+          "__OBSIDIAN_MCP_PATH__=/Users/alex/.nvm/versions/node/v24.14.1/bin:/usr/bin:/bin",
+          "v24.14.1"
+        ].join("\n"),
+        ""
+      );
+    });
+
+    const status = await resolveClientNodeCommand(createPlugin());
+
+    expect(status.command).toBe("/Users/alex/.nvm/versions/node/v24.14.1/bin/node");
+    expect(execFile).toHaveBeenCalledTimes(1);
+  });
 });
 
 type ExecCallback = (error: NodeJS.ErrnoException | null, stdout: string, stderr: string) => void;
 
+interface ClientConfig {
+  mcpServers: {
+    "obsidian-vault": {
+      command: string;
+    };
+  };
+}
+
 function createPlugin(): ObsidianMcpPlugin {
   return {
+    app: {
+      vault: {
+        adapter: {},
+        configDir: "config-dir"
+      }
+    },
     settings: {
+      port: 27125,
       nodeCommandOverride: "",
       npmCommandOverride: ""
     }

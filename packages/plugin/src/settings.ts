@@ -135,6 +135,7 @@ interface SetupRowHandle {
 
 export class ObsidianMcpSettingTab extends PluginSettingTab {
   private activeTab: SettingsTabId = "setup";
+  private resolvedClientNodeCommand: string | undefined;
 
   constructor(app: App, private readonly plugin: ObsidianMcpPlugin) {
     super(app, plugin);
@@ -198,6 +199,7 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
     addSetupButton(runtimeRow.actionsEl, "Check runtime", "search", async (button) => {
       await withBusyButton(button, "Checking", "Check runtime", async () => {
         const status = await getRuntimeStatus(this.plugin, true);
+        await this.refreshClientNodeCommand();
         updateRuntimeSetupRow(runtimeRow, status);
         new Notice(runtimeSummary(status));
       });
@@ -207,11 +209,13 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
         try {
           await installRuntimeDependencies(this.plugin);
           const status = await getRuntimeStatus(this.plugin, true);
+          await this.refreshClientNodeCommand();
           updateRuntimeSetupRow(runtimeRow, status);
           new Notice("Sqlite runtime dependencies installed.");
         } catch (error) {
           console.error("Unable to install MCP runtime dependencies", error);
           const status = await getRuntimeStatus(this.plugin, true);
+          await this.refreshClientNodeCommand();
           updateRuntimeSetupRow(runtimeRow, status);
           new Notice("Could not install sqlite runtime. Check Node.js, npm, network access, and the developer console.");
         }
@@ -467,12 +471,31 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
     keyNote.appendText(". It is only the mcp client name, and you can rename it if you use multiple vaults.");
 
     const snippets = section.createDiv({ cls: "obsidian-mcp-config-actions" });
-    createConfigPreview(snippets, "Mcp client config", buildClientConfig(this.plugin, false), async (button) => {
+    const clientConfigPreview = createConfigPreview(snippets, "Mcp client config", buildClientConfig(this.plugin, false, this.resolvedClientNodeCommand), async (button) => {
       await this.copyClientConfig(button, false);
     });
-    createConfigPreview(snippets, "Mcp client config with embeddings", buildClientConfig(this.plugin, true), async (button) => {
+    const embeddingsConfigPreview = createConfigPreview(snippets, "Mcp client config with embeddings", buildClientConfig(this.plugin, true, this.resolvedClientNodeCommand), async (button) => {
       await this.copyClientConfig(button, true);
     });
+    const nodeCommandNote = section.createEl("p", {
+      text: "Resolving Node.js command for client configs...",
+      cls: "obsidian-mcp-muted obsidian-mcp-compact-note"
+    });
+    void resolveClientNodeCommand(this.plugin)
+      .then((status) => {
+        this.resolvedClientNodeCommand = status.command;
+        clientConfigPreview.updateConfig(buildClientConfig(this.plugin, false, status.command));
+        embeddingsConfigPreview.updateConfig(buildClientConfig(this.plugin, true, status.command));
+        nodeCommandNote.setText(
+          status.ok && status.command
+            ? `Client configs use Node.js command: ${status.command}`
+            : "Client configs use node fallback. Set a Node.js override if LM Studio or Claude Desktop cannot start it."
+        );
+      })
+      .catch((error) => {
+        console.error("Unable to resolve Node.js command for MCP client config previews", error);
+        nodeCommandNote.setText("Client configs use node fallback. Set a Node.js override if LM Studio or Claude Desktop cannot start it.");
+      });
   }
 
   private renderRuntimeDiagnostics(containerEl: HTMLElement): void {
@@ -492,6 +515,9 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
     const refreshRuntime = async (includeCommands: boolean): Promise<RuntimeStatus> => {
       statusEl.setText(includeCommands ? "Checking runtime and commands..." : "Checking runtime...");
       const status = await getRuntimeStatus(this.plugin, includeCommands);
+      if (includeCommands) {
+        await this.refreshClientNodeCommand();
+      }
       renderRuntimeStatus(statusEl, status);
       return status;
     };
@@ -653,13 +679,27 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
 
   private async copyClientConfig(button: ButtonComponent, embeddings: boolean): Promise<void> {
     try {
-      await copyText(buildClientConfig(this.plugin, embeddings));
+      const nodeStatus = await resolveClientNodeCommand(this.plugin);
+      this.resolvedClientNodeCommand = nodeStatus.command;
+      await copyText(buildClientConfig(this.plugin, embeddings, nodeStatus.command));
       await flashButton(button, "Copied", "Copy config");
-      new Notice(embeddings ? "Mcp config with embeddings copied." : "Mcp config copied.");
+      new Notice(
+        nodeStatus.ok
+          ? embeddings
+            ? "Mcp config with embeddings copied."
+            : "Mcp config copied."
+          : "Mcp config copied with node fallback. Set a Node.js override if LM Studio cannot start it."
+      );
     } catch (error) {
       console.error("Unable to copy MCP client config", error);
       new Notice("Could not copy mcp client config.");
     }
+  }
+
+  private async refreshClientNodeCommand(): Promise<string | undefined> {
+    const status = await resolveClientNodeCommand(this.plugin);
+    this.resolvedClientNodeCommand = status.command;
+    return status.command;
   }
 }
 
@@ -1032,7 +1072,7 @@ function createConfigPreview(
   label: string,
   config: string,
   onCopy: (button: ButtonComponent) => Promise<void>
-): void {
+): { updateConfig(config: string): void } {
   const block = containerEl.createDiv({ cls: "obsidian-mcp-config-preview" });
   const header = block.createDiv({ cls: "obsidian-mcp-config-preview-header" });
   header.createEl("h4", { text: label });
@@ -1041,7 +1081,12 @@ function createConfigPreview(
     .addButton((button) => {
       button.setButtonText("Copy config").onClick(() => onCopy(button));
     });
-  block.createEl("pre").createEl("code", { text: config, cls: "obsidian-mcp-code" });
+  const codeEl = block.createEl("pre").createEl("code", { text: config, cls: "obsidian-mcp-code" });
+  return {
+    updateConfig(nextConfig: string): void {
+      codeEl.setText(nextConfig);
+    }
+  };
 }
 
 function renderRuntimeStatus(element: HTMLElement, status: RuntimeStatus): void {
@@ -1118,7 +1163,7 @@ function stringList(value: unknown): string[] {
   return [];
 }
 
-function buildClientConfig(plugin: ObsidianMcpPlugin, embeddings: boolean): string {
+export function buildClientConfig(plugin: ObsidianMcpPlugin, embeddings: boolean, nodeCommand?: string): string {
   const mcpServerPath =
     getMcpServerPath(plugin) ?? "/ABSOLUTE/PATH/TO/Your Vault/CONFIG_DIR/plugins/mcp-vault-bridge/mcp-server.cjs";
   const env: Record<string, string> = {
@@ -1133,7 +1178,7 @@ function buildClientConfig(plugin: ObsidianMcpPlugin, embeddings: boolean): stri
   const baseConfig = {
     mcpServers: {
       "obsidian-vault": {
-        command: plugin.settings.nodeCommandOverride.trim() || "node",
+        command: nodeCommand?.trim() || plugin.settings.nodeCommandOverride.trim() || "node",
         args: [mcpServerPath],
         env
       }
@@ -1534,6 +1579,28 @@ export async function resolveRuntimeCommand(
     detail: `${command} direct lookup failed (${direct.detail}); shell lookup failed (${shell.detail}). ${overrideHint}`,
     command: plugin.settings[command === "node" ? "nodeCommandOverride" : "npmCommandOverride"] || undefined
   };
+}
+
+export async function resolveClientNodeCommand(plugin: ObsidianMcpPlugin): Promise<CommandStatus> {
+  const override = plugin.settings.nodeCommandOverride.trim();
+  if (override) {
+    const overrideStatus = await execFileAsync(override, ["--version"], { timeout: 5_000 });
+    if (overrideStatus.ok) {
+      return {
+        ...overrideStatus,
+        command: override,
+        source: "override",
+        detail: `found via override: ${override} (${overrideStatus.detail})`
+      };
+    }
+  }
+
+  const shell = await resolveCommandThroughShell("node", ["--version"]);
+  if (shell.ok) {
+    return shell;
+  }
+
+  return resolveRuntimeCommand(plugin, "node", ["--version"], "");
 }
 
 async function resolveCommandThroughShell(command: "node" | "npm", args: readonly string[]): Promise<CommandStatus> {
