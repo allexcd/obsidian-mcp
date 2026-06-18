@@ -104,6 +104,10 @@ Add the same config to LM Studio's `mcp.json`. Without embeddings, vault search 
 
 Embeddings are optional. Without them, search uses SQLite full-text search: it is local, fast, and good for exact words, titles, tags, and phrases. With embeddings enabled, the MCP server can also do semantic/vector search, so queries like “notes about long-term planning” can find notes that use different wording.
 
+Embeddings are cached in the local SQLite index by note chunk content hash. When notes are edited, rewritten, deleted, or later excluded from the vault scope, old chunk vectors can become stale cache data. Pruning removes vectors that are no longer referenced by current indexed chunks; it does not change your Obsidian notes.
+
+Most users do not need to prune manually because **Auto-prune embeddings** is enabled by default in the plugin settings and runs after note writes and `refresh_index`. Manual pruning is useful if you disable auto-prune, change exclusions, troubleshoot a large `index.sqlite`, rebuild/delete index data, or see orphaned embeddings reported by `index_status`. You can trigger it from Obsidian with **Advanced settings → Prune now**, or from an MCP client by asking it to run `prune_embeddings`.
+
 The plugin/MCP server does not automatically know which embedding model LM Studio loaded. The model value must match the identifier exposed by LM Studio's embeddings endpoint. If no embedding model is loaded, search still works through SQLite full-text search, but semantic search and `related_notes` are unavailable.
 
 For LM Studio, load an embedding model such as `nomic-embed-text-v1.5`, start the local server, then add these env vars to the same MCP config:
@@ -168,6 +172,8 @@ When you add or edit notes later, ask your MCP client to refresh the index:
 
 This calls `refresh_index`, updates SQLite, and refreshes embeddings too if they are enabled.
 
+The SQLite file is a rebuildable cache, not the source of truth. If `index.sqlite` is deleted, run `refresh_index` to recreate it; embeddings may need to be recomputed.
+
 ## MCP Tools
 
 | Tool | Description |
@@ -175,6 +181,7 @@ This calls `refresh_index`, updates SQLite, and refreshes embeddings too if they
 | `vault_status` | Plugin version, vault name, included note count, scope summary |
 | `refresh_index` | Rebuild the SQLite index (and embeddings if enabled) |
 | `index_status` | Index freshness, row counts, embedding state |
+| `prune_embeddings` | Remove stale cached embedding vectors no longer used by indexed note chunks |
 | `ask_vault` | Default tool for natural vault questions; uses embeddings automatically when available |
 | `analyze_vault` | Find candidate notes/snippets for themes, patterns, and vault-wide synthesis |
 | `list_notes` | Paginated list of included notes with metadata |
@@ -199,6 +206,7 @@ All tools return JSON text. Note content is marked untrusted so hosts do not tre
 | `OBSIDIAN_MCP_TOKEN` | — | Required. Bearer token from the plugin settings |
 | `OBSIDIAN_MCP_DB` | plugin folder `index.sqlite` | Override the SQLite cache path |
 | `OBSIDIAN_MCP_MAX_RESULTS` | `20` | Default result cap for list/search tools |
+| `OBSIDIAN_MCP_AUTO_PRUNE_EMBEDDINGS` | plugin setting, usually `on` | Override automatic stale embedding pruning |
 | `OBSIDIAN_MCP_EMBEDDINGS` | `off` | Set to `on` to enable semantic search |
 | `OBSIDIAN_MCP_EMBEDDING_BASE_URL` | — | OpenAI-compatible endpoint, e.g. `http://127.0.0.1:1234/v1` |
 | `OBSIDIAN_MCP_EMBEDDING_API_KEY` | — | Optional API key for the embedding endpoint |

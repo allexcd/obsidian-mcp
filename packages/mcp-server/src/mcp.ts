@@ -1,7 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { DEFAULT_MAX_TOOL_TEXT_BYTES, truncateText, type SearchResult, type WriteNoteResponse } from "@obsidian-mcp/shared";
+import {
+  DEFAULT_MAX_TOOL_TEXT_BYTES,
+  truncateText,
+  type PruneEmbeddingsResult,
+  type SearchResult,
+  type WriteNoteResponse
+} from "@obsidian-mcp/shared";
 import type { BridgeClient } from "./bridge-client.js";
 import type { ServerConfig } from "./config.js";
 import type { VaultDatabase } from "./database.js";
@@ -90,6 +96,17 @@ export async function startMcpServer(runtime: McpRuntime): Promise<void> {
       inputSchema: {}
     },
     () => jsonResponse(getIndexStatus(runtime))
+  );
+
+  server.registerTool(
+    "prune_embeddings",
+    {
+      title: "Prune Embeddings",
+      description:
+        "Remove stale cached embedding vectors no longer used by indexed note chunks. Usually automatic after writes and refresh_index; run manually after maintenance or when index_status reports orphaned embeddings.",
+      inputSchema: {}
+    },
+    () => jsonResponse({ maintenance: formatMaintenance(runtime.db.pruneOrphanedEmbeddings()), index: getIndexStatus(runtime) })
   );
 
   server.registerTool(
@@ -354,14 +371,48 @@ function jsonResponse(value: unknown): { content: Array<{ type: "text"; text: st
 
 export function indexWrittenNote(runtime: McpRuntime, response: WriteNoteResponse): WriteNoteResponse & {
   index: ReturnType<typeof getIndexStatus>;
+  maintenance?: ReturnType<typeof formatMaintenance>;
   hint?: string;
 } {
   runtime.db.upsertNote(response.note);
+  const maintenance = runtime.config.autoPruneEmbeddings ? formatMaintenance(runtime.db.pruneOrphanedEmbeddings()) : undefined;
   return {
     ...response,
+    maintenance,
     index: getIndexStatus(runtime),
-    hint: runtime.embeddings.enabled ? "Note content was updated in the local index. Run refresh_index to refresh embeddings." : undefined
+    hint: writeMaintenanceHint(runtime, maintenance)
   };
+}
+
+function formatMaintenance(result: PruneEmbeddingsResult): {
+  prunedEmbeddings: number;
+  orphanedEmbeddingsRemaining: number;
+  estimatedBytesFreed: number;
+  summary: string;
+} {
+  return {
+    prunedEmbeddings: result.deletedEmbeddings,
+    orphanedEmbeddingsRemaining: result.orphanedAfterCount,
+    estimatedBytesFreed: result.estimatedBytesFreed,
+    summary:
+      result.deletedEmbeddings > 0
+        ? `Pruned ${result.deletedEmbeddings} orphaned embedding vector(s). Estimated ${result.estimatedBytesFreed} byte(s) of stale vector data removed.`
+        : "No orphaned embedding vectors to prune."
+  };
+}
+
+function writeMaintenanceHint(runtime: McpRuntime, maintenance: ReturnType<typeof formatMaintenance> | undefined): string | undefined {
+  if (!runtime.embeddings.enabled) {
+    return undefined;
+  }
+  const refresh = "Run refresh_index to refresh embeddings for changed note chunks.";
+  if (!runtime.config.autoPruneEmbeddings) {
+    return `${refresh} Auto-prune is disabled; run prune_embeddings to clean stale vectors.`;
+  }
+  if (maintenance && maintenance.prunedEmbeddings > 0) {
+    return `${refresh} ${maintenance.summary}`;
+  }
+  return refresh;
 }
 
 function mergeResults<T extends { path: string; score: number }>(a: T[], b: T[], limit: number): T[] {
@@ -460,17 +511,24 @@ function getIndexStatus(runtime: McpRuntime): ReturnType<VaultDatabase["stats"]>
   databasePath: string | null;
   databasePathSource: ServerConfig["dbPathSource"];
   autoIndexEnabled: boolean;
+  autoPruneEmbeddingsEnabled: boolean;
+  autoPruneEmbeddingsSource: ServerConfig["autoPruneEmbeddingsSource"];
   indexing: boolean;
   lastError: string | null;
+  hint?: string;
 } {
   const indexer = runtime.indexer.status();
+  const stats = runtime.db.stats();
   return {
-    ...runtime.db.stats(),
+    ...stats,
     databasePath: runtime.config.dbPath,
     databasePathSource: runtime.config.dbPathSource,
     autoIndexEnabled: runtime.config.autoIndex,
+    autoPruneEmbeddingsEnabled: runtime.config.autoPruneEmbeddings,
+    autoPruneEmbeddingsSource: runtime.config.autoPruneEmbeddingsSource,
     indexing: indexer.indexing,
-    lastError: indexer.lastError
+    lastError: indexer.lastError,
+    hint: stats.orphanedEmbeddingCount > 0 ? "Run prune_embeddings to clean stale cached embedding vectors." : undefined
   };
 }
 

@@ -2,13 +2,23 @@ import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import type Database from "better-sqlite3";
-import { chunkMarkdown, titleFromPath, type MarkdownChunk, type SearchResult, type VaultNote } from "@obsidian-mcp/shared";
+import {
+  chunkMarkdown,
+  countOrphanedEmbeddingsInDatabase,
+  pruneOrphanedEmbeddingsInDatabase,
+  titleFromPath,
+  type MarkdownChunk,
+  type PruneEmbeddingsResult,
+  type SearchResult,
+  type VaultNote
+} from "@obsidian-mcp/shared";
 import { sha256 } from "./hash.js";
 
 export interface IndexStats {
   noteCount: number;
   chunkCount: number;
   embeddingCount: number;
+  orphanedEmbeddingCount: number;
   lastIndexedAt: string | null;
 }
 
@@ -52,11 +62,13 @@ export class VaultDatabase {
     const noteCount = this.db.prepare("SELECT COUNT(*) AS count FROM notes").get() as { count: number };
     const chunkCount = this.db.prepare("SELECT COUNT(*) AS count FROM chunks").get() as { count: number };
     const embeddingCount = this.db.prepare("SELECT COUNT(*) AS count FROM embeddings").get() as { count: number };
+    const orphanedEmbeddingCount = this.countOrphanedEmbeddings();
     const last = this.db.prepare("SELECT MAX(indexed_at) AS lastIndexedAt FROM notes").get() as { lastIndexedAt: string | null };
     return {
       noteCount: noteCount.count,
       chunkCount: chunkCount.count,
       embeddingCount: embeddingCount.count,
+      orphanedEmbeddingCount,
       lastIndexedAt: last.lastIndexedAt
     };
   }
@@ -269,6 +281,10 @@ export class VaultDatabase {
       .run(contentHash, provider, model, JSON.stringify(vector), vector.length, new Date().toISOString());
   }
 
+  pruneOrphanedEmbeddings(): PruneEmbeddingsResult {
+    return pruneOrphanedEmbeddingsInDatabase(this.db);
+  }
+
   semanticSearch(queryVector: number[], provider: string, model: string, limit: number): SearchResult[] {
     const rows = this.db
       .prepare(
@@ -348,6 +364,14 @@ export class VaultDatabase {
         PRIMARY KEY(content_hash, provider, model)
       );
     `);
+  }
+
+  private embeddingCount(): number {
+    return (this.db.prepare("SELECT COUNT(*) AS count FROM embeddings").get() as { count: number }).count;
+  }
+
+  private countOrphanedEmbeddings(): number {
+    return countOrphanedEmbeddingsInDatabase(this.db);
   }
 }
 

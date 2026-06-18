@@ -8,6 +8,7 @@ const indexStats: IndexStats = {
   noteCount: 2,
   chunkCount: 4,
   embeddingCount: 4,
+  orphanedEmbeddingCount: 0,
   lastIndexedAt: "2026-01-01T00:00:00.000Z"
 };
 
@@ -114,7 +115,9 @@ describe("indexWrittenNote", () => {
     const result = indexWrittenNote(runtime, response);
 
     expect(upsertNote).toHaveBeenCalledWith(response.note);
+    expect(runtime.db.pruneOrphanedEmbeddings).toHaveBeenCalledOnce();
     expect(result.operation).toBe("create");
+    expect(result.maintenance?.prunedEmbeddings).toBe(0);
     expect(result.hint).toBeUndefined();
   });
 
@@ -129,6 +132,21 @@ describe("indexWrittenNote", () => {
 
     expect(result.hint).toContain("refresh_index");
   });
+
+  it("skips automatic pruning when disabled", () => {
+    const runtime = createRuntime({
+      embeddingsEnabled: true,
+      autoPruneEmbeddings: false,
+      stats: indexStats,
+      upsertNote: vi.fn()
+    });
+
+    const result = indexWrittenNote(runtime, createWriteResponse("Notes/New.md"));
+
+    expect(runtime.db.pruneOrphanedEmbeddings).not.toHaveBeenCalled();
+    expect(result.maintenance).toBeUndefined();
+    expect(result.hint).toContain("prune_embeddings");
+  });
 });
 
 function createRuntime(options: {
@@ -139,6 +157,7 @@ function createRuntime(options: {
   semanticSearch?: () => SearchResult[];
   listNotes?: () => IndexedNote[];
   upsertNote?: (note: WriteNoteResponse["note"]) => void;
+  autoPruneEmbeddings?: boolean;
 }): McpRuntime {
   return {
     config: {
@@ -148,6 +167,8 @@ function createRuntime(options: {
       dbPathSource: "env",
       maxResults: 20,
       autoIndex: true,
+      autoPruneEmbeddings: options.autoPruneEmbeddings ?? true,
+      autoPruneEmbeddingsSource: "bridge",
       embeddings: {
         enabled: options.embeddingsEnabled,
         baseUrl: options.embeddingsEnabled ? "http://127.0.0.1:1234/v1" : null,
@@ -162,7 +183,15 @@ function createRuntime(options: {
       searchFts: options.searchFts ?? (() => []),
       semanticSearch: options.semanticSearch ?? (() => []),
       listNotes: options.listNotes ?? (() => []),
-      upsertNote: options.upsertNote ?? (() => undefined)
+      upsertNote: options.upsertNote ?? (() => undefined),
+      pruneOrphanedEmbeddings: vi.fn(() => ({
+        beforeCount: 0,
+        afterCount: 0,
+        orphanedBeforeCount: 0,
+        orphanedAfterCount: 0,
+        deletedEmbeddings: 0,
+        estimatedBytesFreed: 0
+      }))
     } as unknown as McpRuntime["db"],
     embeddings: {
       enabled: options.embeddingsEnabled,

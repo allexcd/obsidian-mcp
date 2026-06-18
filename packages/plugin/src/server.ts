@@ -149,6 +149,7 @@ function buildStatus(plugin: ObsidianMcpPlugin): BridgeStatus {
     bridgeVersion: plugin.manifest.version,
     readOnly: !plugin.settings.writeToolsEnabled,
     writeToolsEnabled: plugin.settings.writeToolsEnabled,
+    autoPruneEmbeddings: plugin.settings.autoPruneEmbeddings,
     pluginDirectory,
     scope: normalizeVaultScope(plugin.settings),
     vaultPreview: buildVaultScopePreview(plugin),
@@ -338,6 +339,10 @@ async function routeAppendNote(
   route: string,
   body: JsonRecord
 ): Promise<void> {
+  if (!(await ensureWritesEnabled(plugin, response, route, stringField(body.path)))) {
+    return;
+  }
+
   const content = stringField(body.content);
   if (!content) {
     await plugin.audit({ route, path: stringField(body.path), allowed: false, reason: "empty_append" });
@@ -389,7 +394,9 @@ async function routeMutateExistingNote(
   edit: (existing: string) => string
 ): Promise<void> {
   const rawPath = stringField(body.path);
-  if (!(await ensureWritesEnabled(plugin, response, route, rawPath))) {
+  if (!plugin.settings.writeToolsEnabled) {
+    await plugin.audit({ route, path: rawPath, allowed: false, reason: "writes_disabled" });
+    sendJson(response, 403, { error: "Write tools are disabled in the Obsidian plugin settings." });
     return;
   }
 

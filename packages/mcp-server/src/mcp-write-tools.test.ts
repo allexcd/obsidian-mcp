@@ -63,12 +63,17 @@ describe("MCP write tools", () => {
       throw new Error("create_note was not registered");
     }
     const result = await tool.handler({ path: "Notes/New.md", content: "# New", overwrite: false });
-    const parsed = JSON.parse(result.content[0]!.text) as WriteNoteResponse & { index: { noteCount: number } };
+    const parsed = JSON.parse(result.content[0]!.text) as WriteNoteResponse & {
+      index: { noteCount: number };
+      maintenance?: { summary: string };
+    };
 
     expect(runtime.bridge.createNote).toHaveBeenCalledWith("Notes/New.md", "# New", false);
     expect(runtime.db.upsertNote).toHaveBeenCalledWith(expect.objectContaining({ path: "Notes/New.md", content: "# New" }));
+    expect(runtime.db.pruneOrphanedEmbeddings).toHaveBeenCalledOnce();
     expect(parsed.operation).toBe("create");
     expect(parsed.index.noteCount).toBe(1);
+    expect(parsed.maintenance?.summary).toContain("No orphaned");
   });
 
   it("replace_note_text preserves occurrenceIndex and returns an embedding refresh hint", async () => {
@@ -86,10 +91,27 @@ describe("MCP write tools", () => {
     expect(runtime.db.upsertNote).toHaveBeenCalled();
     expect(parsed.hint).toContain("refresh_index");
   });
+
+  it("registers prune_embeddings and returns cleanup counts", async () => {
+    const runtime = createRuntime({ orphanedEmbeddings: 2 });
+    await startMcpServer(runtime);
+
+    const tool = sdkMock.registeredTools.get("prune_embeddings");
+    if (!tool) {
+      throw new Error("prune_embeddings was not registered");
+    }
+    const result = await tool.handler({});
+    const parsed = JSON.parse(result.content[0]!.text) as { maintenance: { prunedEmbeddings: number }; index: { orphanedEmbeddingCount: number } };
+
+    expect(runtime.db.pruneOrphanedEmbeddings).toHaveBeenCalledOnce();
+    expect(parsed.maintenance.prunedEmbeddings).toBe(2);
+    expect(parsed.index.orphanedEmbeddingCount).toBe(0);
+  });
 });
 
-function createRuntime(options: { embeddingsEnabled?: boolean } = {}): McpRuntime {
+function createRuntime(options: { embeddingsEnabled?: boolean; orphanedEmbeddings?: number } = {}): McpRuntime {
   const embeddingsEnabled = options.embeddingsEnabled ?? false;
+  let orphanedEmbeddings = options.orphanedEmbeddings ?? 0;
   const note = createWrittenNote("Notes/New.md", "# New");
   return {
     config: {
@@ -99,6 +121,8 @@ function createRuntime(options: { embeddingsEnabled?: boolean } = {}): McpRuntim
       dbPathSource: "env",
       maxResults: 20,
       autoIndex: false,
+      autoPruneEmbeddings: true,
+      autoPruneEmbeddingsSource: "bridge",
       embeddings: {
         enabled: embeddingsEnabled,
         baseUrl: embeddingsEnabled ? "http://127.0.0.1:1234/v1" : null,
@@ -116,6 +140,7 @@ function createRuntime(options: { embeddingsEnabled?: boolean } = {}): McpRuntim
           bridgeVersion: "0.4.3",
           readOnly: false,
           writeToolsEnabled: true,
+          autoPruneEmbeddings: true,
           pluginDirectory: {
             vaultPath: ".obsidian/plugins/mcp-vault-bridge",
             filesystemPath: "/vault/.obsidian/plugins/mcp-vault-bridge",
@@ -144,10 +169,23 @@ function createRuntime(options: { embeddingsEnabled?: boolean } = {}): McpRuntim
       stats: vi.fn(() => ({
         noteCount: 1,
         chunkCount: 1,
-        embeddingCount: embeddingsEnabled ? 0 : 0,
+        embeddingCount: orphanedEmbeddings,
+        orphanedEmbeddingCount: orphanedEmbeddings,
         lastIndexedAt: "2026-01-01T00:00:00.000Z"
       })),
-      upsertNote: vi.fn()
+      upsertNote: vi.fn(),
+      pruneOrphanedEmbeddings: vi.fn(() => {
+        const deletedEmbeddings = orphanedEmbeddings;
+        orphanedEmbeddings = 0;
+        return {
+          beforeCount: deletedEmbeddings,
+          afterCount: 0,
+          orphanedBeforeCount: deletedEmbeddings,
+          orphanedAfterCount: 0,
+          deletedEmbeddings,
+          estimatedBytesFreed: deletedEmbeddings * 128
+        };
+      })
     } as unknown as McpRuntime["db"],
     embeddings: {
       enabled: embeddingsEnabled,
