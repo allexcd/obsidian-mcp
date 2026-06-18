@@ -2,11 +2,15 @@ import { FileSystemAdapter, TFile } from "obsidian";
 import {
   clampLimit,
   clampOffset,
+  appendNoteContent,
+  deleteExactText,
   isPathIncluded,
   makeSnippet,
+  NoteEditError,
   normalizeVaultScope,
   normalizeVaultPath,
   parseMarkdown,
+  replaceExactText,
   titleFromPath,
   truncateText,
   type BridgeExportResponse,
@@ -16,7 +20,8 @@ import {
   type NoteMetadata,
   type SearchResult,
   type VaultNote,
-  type VaultNoteSummary
+  type VaultNoteSummary,
+  type WriteNoteResponse
 } from "@obsidian-mcp/shared";
 import type ObsidianMcpPlugin from "./main.js";
 import { buildVaultScopePreview } from "./settings.js";
@@ -38,6 +43,8 @@ interface BridgeCache {
   links?: { link: string }[];
   embeds?: { link: string }[];
 }
+
+type WriteOperation = WriteNoteResponse["operation"];
 
 export async function createBridgeServer(plugin: ObsidianMcpPlugin, token: string): Promise<BridgeServerHandle> {
   const http = loadNodeHttp();
@@ -82,7 +89,7 @@ async function handleRequest(
     return;
   }
 
-  const body = request.method === "POST" ? await readJsonBody(request) : {};
+  const body = request.method === "POST" ? await readJsonBody(request, plugin.settings.maxNoteBytes + 16_384) : {};
   const route = url.pathname.replace(/\/+$/, "") || "/";
 
   switch (route) {
@@ -111,6 +118,21 @@ async function handleRequest(
     case "/notes/links":
       await routeLinks(plugin, response, route, body);
       return;
+    case "/notes/create":
+      await routeCreateNote(plugin, response, route, body);
+      return;
+    case "/notes/append":
+      await routeAppendNote(plugin, response, route, body);
+      return;
+    case "/notes/replace":
+      await routeReplaceNoteText(plugin, response, route, body);
+      return;
+    case "/notes/delete-text":
+      await routeDeleteNoteText(plugin, response, route, body);
+      return;
+    case "/notes/rewrite":
+      await routeRewriteNote(plugin, response, route, body);
+      return;
     default:
       await plugin.audit({ route, allowed: false, reason: "unknown_route" });
       sendJson(response, 404, { error: "Unknown bridge route." });
@@ -125,7 +147,9 @@ function buildStatus(plugin: ObsidianMcpPlugin): BridgeStatus {
     vaultName: plugin.app.vault.getName(),
     pluginVersion: plugin.manifest.version,
     bridgeVersion: plugin.manifest.version,
-    readOnly: true,
+    readOnly: !plugin.settings.writeToolsEnabled,
+    writeToolsEnabled: plugin.settings.writeToolsEnabled,
+    autoPruneEmbeddings: plugin.settings.autoPruneEmbeddings,
     pluginDirectory,
     scope: normalizeVaultScope(plugin.settings),
     vaultPreview: buildVaultScopePreview(plugin),
@@ -264,12 +288,196 @@ async function routeLinks(
   });
 }
 
+async function routeCreateNote(
+  plugin: ObsidianMcpPlugin,
+  response: ServerResponse,
+  route: string,
+  body: JsonRecord
+): Promise<void> {
+  if (!(await ensureWritesEnabled(plugin, response, route, stringField(body.path)))) {
+    return;
+  }
+
+  const path = getWritableNewPath(plugin, body.path);
+  const rawPath = stringField(body.path);
+  if (!path) {
+    await plugin.audit({ route, path: rawPath, allowed: false, reason: "denied_or_invalid" });
+    sendJson(response, 404, { error: "Writable Markdown path is not allowed." });
+    return;
+  }
+
+  const content = stringField(body.content);
+  if (!isContentWithinLimit(content, plugin.settings.maxNoteBytes)) {
+    await plugin.audit({ route, path, allowed: false, reason: "content_too_large" });
+    sendJson(response, 413, { error: `Content exceeds maximum note size of ${plugin.settings.maxNoteBytes} bytes.` });
+    return;
+  }
+  if (!isContentAllowedAfterWrite(plugin, path, content)) {
+    await plugin.audit({ route, path, allowed: false, reason: "post_write_scope_denied" });
+    sendJson(response, 403, { error: "Written note content would be excluded by the current vault scope." });
+    return;
+  }
+
+  const existing = plugin.app.vault.getAbstractFileByPath(path);
+  const overwrite = booleanField(body.overwrite);
+  if (existing && !(existing instanceof TFile && existing.extension === "md" && overwrite && isAllowedFile(plugin, existing))) {
+    await plugin.audit({ route, path, allowed: false, reason: "path_exists" });
+    sendJson(response, 409, { error: "A vault item already exists at this path." });
+    return;
+  }
+
+  try {
+    const file = existing instanceof TFile ? existing : await plugin.app.vault.create(path, content);
+    if (existing instanceof TFile) {
+      await plugin.app.vault.modify(file, content);
+    }
+    await sendWriteResponse(plugin, response, route, "create", file, content);
+  } catch (error) {
+    await plugin.audit({ route, path, allowed: false, reason: "write_failed" });
+    sendJson(response, 400, { error: formatWriteError(error) });
+  }
+}
+
+async function routeAppendNote(
+  plugin: ObsidianMcpPlugin,
+  response: ServerResponse,
+  route: string,
+  body: JsonRecord
+): Promise<void> {
+  if (!(await ensureWritesEnabled(plugin, response, route, stringField(body.path)))) {
+    return;
+  }
+
+  const content = stringField(body.content);
+  if (!content) {
+    await plugin.audit({ route, path: stringField(body.path), allowed: false, reason: "empty_append" });
+    sendJson(response, 400, { error: "Append content must not be empty." });
+    return;
+  }
+  await routeMutateExistingNote(plugin, response, route, body, "append", (existing) =>
+    appendNoteContent(existing, content)
+  );
+}
+
+async function routeReplaceNoteText(
+  plugin: ObsidianMcpPlugin,
+  response: ServerResponse,
+  route: string,
+  body: JsonRecord
+): Promise<void> {
+  await routeMutateExistingNote(plugin, response, route, body, "replace", (existing) =>
+    replaceExactText(existing, stringField(body.oldText), stringField(body.newText), optionalOccurrenceIndex(body.occurrenceIndex))
+  );
+}
+
+async function routeDeleteNoteText(
+  plugin: ObsidianMcpPlugin,
+  response: ServerResponse,
+  route: string,
+  body: JsonRecord
+): Promise<void> {
+  await routeMutateExistingNote(plugin, response, route, body, "delete_text", (existing) =>
+    deleteExactText(existing, stringField(body.text), optionalOccurrenceIndex(body.occurrenceIndex))
+  );
+}
+
+async function routeRewriteNote(
+  plugin: ObsidianMcpPlugin,
+  response: ServerResponse,
+  route: string,
+  body: JsonRecord
+): Promise<void> {
+  await routeMutateExistingNote(plugin, response, route, body, "rewrite", () => stringField(body.content));
+}
+
+async function routeMutateExistingNote(
+  plugin: ObsidianMcpPlugin,
+  response: ServerResponse,
+  route: string,
+  body: JsonRecord,
+  operation: Exclude<WriteOperation, "create">,
+  edit: (existing: string) => string
+): Promise<void> {
+  const rawPath = stringField(body.path);
+  if (!plugin.settings.writeToolsEnabled) {
+    await plugin.audit({ route, path: rawPath, allowed: false, reason: "writes_disabled" });
+    sendJson(response, 403, { error: "Write tools are disabled in the Obsidian plugin settings." });
+    return;
+  }
+
+  const file = getAllowedFileByPath(plugin, body.path);
+  if (!file) {
+    await plugin.audit({ route, path: rawPath, allowed: false, reason: "denied_or_missing" });
+    sendJson(response, 404, { error: "Writable note not found." });
+    return;
+  }
+
+  try {
+    const existing = await plugin.app.vault.cachedRead(file);
+    const next = edit(existing);
+    if (!isContentWithinLimit(next, plugin.settings.maxNoteBytes)) {
+      await plugin.audit({ route, path: file.path, allowed: false, reason: "content_too_large" });
+      sendJson(response, 413, { error: `Content exceeds maximum note size of ${plugin.settings.maxNoteBytes} bytes.` });
+      return;
+    }
+    if (!isContentAllowedAfterWrite(plugin, file.path, next)) {
+      await plugin.audit({ route, path: file.path, allowed: false, reason: "post_write_scope_denied" });
+      sendJson(response, 403, { error: "Written note content would be excluded by the current vault scope." });
+      return;
+    }
+    await plugin.app.vault.modify(file, next);
+    await sendWriteResponse(plugin, response, route, operation, file, next);
+  } catch (error) {
+    await plugin.audit({ route, path: file.path, allowed: false, reason: error instanceof NoteEditError ? error.code : "write_failed" });
+    sendJson(response, error instanceof NoteEditError ? 400 : 500, { error: formatWriteError(error) });
+  }
+}
+
+async function sendWriteResponse(
+  plugin: ObsidianMcpPlugin,
+  response: ServerResponse,
+  route: string,
+  operation: WriteOperation,
+  file: TFile,
+  content: string
+): Promise<void> {
+  const note = buildVaultNoteFromContent(plugin, file, content, plugin.settings.maxNoteBytes);
+  await plugin.audit({ route, path: file.path, allowed: true });
+  sendJson(response, 200, { operation, note } satisfies WriteNoteResponse);
+}
+
+async function ensureWritesEnabled(
+  plugin: ObsidianMcpPlugin,
+  response: ServerResponse,
+  route: string,
+  path?: string
+): Promise<boolean> {
+  if (plugin.settings.writeToolsEnabled) {
+    return true;
+  }
+  await plugin.audit({ route, path, allowed: false, reason: "writes_disabled" });
+  sendJson(response, 403, { error: "Write tools are disabled in the Obsidian plugin settings." });
+  return false;
+}
+
 function getAllowedMarkdownFiles(plugin: ObsidianMcpPlugin): TFile[] {
   const files = plugin.app.vault
     .getMarkdownFiles()
     .filter((file) => isAllowedFile(plugin, file))
     .sort((a, b) => a.path.localeCompare(b.path));
   return files;
+}
+
+function getWritableNewPath(plugin: ObsidianMcpPlugin, rawPath: unknown): string | null {
+  if (typeof rawPath !== "string") {
+    return null;
+  }
+  try {
+    const normalized = normalizeVaultPath(rawPath);
+    return isPathIncluded(normalized, [], plugin.settings) ? normalized : null;
+  } catch {
+    return null;
+  }
 }
 
 function getAllowedFileByPath(plugin: ObsidianMcpPlugin, rawPath: unknown) {
@@ -295,6 +503,11 @@ function isAllowedFile(plugin: ObsidianMcpPlugin, file: TFile): boolean {
   return isPathIncluded(file.path, tags, plugin.settings);
 }
 
+function isContentAllowedAfterWrite(plugin: ObsidianMcpPlugin, path: string, content: string): boolean {
+  const parsed = parseMarkdown(path, content);
+  return isPathIncluded(path, parsed.tags, plugin.settings);
+}
+
 function buildSummary(plugin: ObsidianMcpPlugin, file: TFile): VaultNoteSummary {
   const metadata = buildMetadata(plugin, file);
   return {
@@ -310,6 +523,10 @@ function buildSummary(plugin: ObsidianMcpPlugin, file: TFile): VaultNoteSummary 
 
 async function buildVaultNote(plugin: ObsidianMcpPlugin, file: TFile, maxBytes = plugin.settings.maxNoteBytes): Promise<VaultNote> {
   const content = await plugin.app.vault.cachedRead(file);
+  return buildVaultNoteFromContent(plugin, file, content, maxBytes);
+}
+
+function buildVaultNoteFromContent(plugin: ObsidianMcpPlugin, file: TFile, content: string, maxBytes = plugin.settings.maxNoteBytes): VaultNote {
   const truncated = truncateText(content, maxBytes);
   const metadata = buildMetadata(plugin, file, content);
   return {
@@ -330,7 +547,7 @@ function buildMetadata(plugin: ObsidianMcpPlugin, file: TFile, content?: string)
   const cache = plugin.app.metadataCache.getFileCache(file);
   const parsed = content ? parseMarkdown(file.path, content) : null;
   const cacheTags = extractCacheTags(cache);
-  const frontmatter = cache?.frontmatter ?? parsed?.frontmatter ?? {};
+  const frontmatter = parsed?.frontmatter ?? cache?.frontmatter ?? {};
   const tags = Array.from(new Set([...(parsed?.tags ?? []), ...cacheTags])).sort();
   const aliases = extractAliases(cache, parsed?.aliases ?? []);
   const outlinks = extractOutlinks(cache, parsed?.wikilinks ?? []);
@@ -398,13 +615,13 @@ function isAuthorized(request: IncomingMessage, token: string): boolean {
   return header === `Bearer ${token}`;
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<JsonRecord> {
+async function readJsonBody(request: IncomingMessage, maxBytes: number): Promise<JsonRecord> {
   const chunks: Uint8Array[] = [];
   let total = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     total += buffer.byteLength;
-    if (total > 64_000) {
+    if (total > Math.max(64_000, maxBytes)) {
       throw new Error("Request body too large.");
     }
     chunks.push(buffer);
@@ -425,6 +642,28 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
 
 function stringField(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function booleanField(value: unknown): boolean {
+  return value === true;
+}
+
+function optionalOccurrenceIndex(value: unknown): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+    return value;
+  }
+  throw new NoteEditError("occurrenceIndex must be a non-negative integer when provided.", "invalid_occurrence");
+}
+
+function isContentWithinLimit(value: string, maxBytes: number): boolean {
+  return new TextEncoder().encode(value).byteLength <= maxBytes;
+}
+
+function formatWriteError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function stringList(value: unknown): string[] {

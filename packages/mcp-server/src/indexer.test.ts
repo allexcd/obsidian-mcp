@@ -45,8 +45,18 @@ describe("VaultIndexer", () => {
 
     const result = await indexer.refreshIfEmpty();
 
-    expect(result).toEqual({ indexedNotes: 1, embeddingChunks: 0 });
+    expect(result).toEqual({
+      indexedNotes: 1,
+      embeddingChunks: 0,
+      maintenance: {
+        prunedEmbeddings: 0,
+        orphanedEmbeddingsRemaining: 0,
+        estimatedBytesFreed: 0,
+        summary: "No orphaned embedding vectors to prune."
+      }
+    });
     expect(exportNotes).toHaveBeenCalledOnce();
+    expect(mockCalls(db, "pruneOrphanedEmbeddings")).toHaveLength(1);
     expect(indexer.status()).toMatchObject({ indexing: false, lastError: null });
   });
 
@@ -69,6 +79,17 @@ describe("VaultIndexer", () => {
     expect(left).toEqual(right);
     expect(exportNotes).toHaveBeenCalledOnce();
   });
+
+  it("can skip pruning after refresh when auto-prune is disabled", async () => {
+    const { bridge } = createBridge();
+    const db = createDb(() => 0);
+    const indexer = new VaultIndexer(bridge, db, createEmbeddings(), false);
+
+    const result = await indexer.refresh();
+
+    expect(result.maintenance).toBeUndefined();
+    expect(mockCalls(db, "pruneOrphanedEmbeddings")).toHaveLength(0);
+  });
 });
 
 function createBridge(): { bridge: BridgeClient; exportNotes: ReturnType<typeof vi.fn> } {
@@ -85,9 +106,18 @@ function createDb(getNoteCount: () => number, onReplace: (notes: VaultNote[]) =>
       noteCount: getNoteCount(),
       chunkCount: getNoteCount(),
       embeddingCount: 0,
+      orphanedEmbeddingCount: 0,
       lastIndexedAt: getNoteCount() > 0 ? "2026-01-01T00:00:00.000Z" : null
     }),
-    replaceNotes: vi.fn(onReplace)
+    replaceNotes: vi.fn(onReplace),
+    pruneOrphanedEmbeddings: vi.fn(() => ({
+      beforeCount: 0,
+      afterCount: 0,
+      orphanedBeforeCount: 0,
+      orphanedAfterCount: 0,
+      deletedEmbeddings: 0,
+      estimatedBytesFreed: 0
+    }))
   } as unknown as VaultDatabase;
 }
 
@@ -95,4 +125,8 @@ function createEmbeddings(): EmbeddingClient {
   return {
     enabled: false
   } as EmbeddingClient;
+}
+
+function mockCalls<T extends object>(object: T, key: keyof T): unknown[][] {
+  return (object[key] as { mock: { calls: unknown[][] } }).mock.calls;
 }

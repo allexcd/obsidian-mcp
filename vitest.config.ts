@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@obsidian-mcp/shared": resolve("packages/shared/src/index.ts"),
+      "obsidian": resolve("packages/plugin/src/test-obsidian.ts"),
       "virtual:mcp-server-payload": resolve("packages/plugin/src/test-mcp-server-payload.ts")
     }
   },

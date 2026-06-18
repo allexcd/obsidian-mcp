@@ -16,6 +16,9 @@ import {
   normalizeTag,
   normalizeVaultPath,
   parseDelimitedList,
+  pruneOrphanedEmbeddingsInDatabase,
+  type PrunableEmbeddingDatabase,
+  type PruneEmbeddingsResult,
   type VaultScopePreview
 } from "@obsidian-mcp/shared";
 import type ObsidianMcpPlugin from "./main.js";
@@ -28,6 +31,8 @@ export interface ObsidianMcpSettings {
   excludedFiles: string[];
   excludedTags: string[];
   maxNoteBytes: number;
+  writeToolsEnabled: boolean;
+  autoPruneEmbeddings: boolean;
   auditEnabled: boolean;
   tokenSecretName: string;
   nodeCommandOverride: string;
@@ -41,6 +46,8 @@ export const DEFAULT_SETTINGS: ObsidianMcpSettings = {
   excludedFiles: [],
   excludedTags: [],
   maxNoteBytes: DEFAULT_MAX_NOTE_BYTES,
+  writeToolsEnabled: false,
+  autoPruneEmbeddings: true,
   auditEnabled: true,
   tokenSecretName: "obsidian-mcp-bridge-token",
   nodeCommandOverride: "",
@@ -83,6 +90,14 @@ interface NodeFsPromises {
 
 interface NodePath {
   join(...paths: string[]): string;
+}
+
+interface NodeModule {
+  createRequire(filename: string): (moduleName: string) => unknown;
+}
+
+interface BetterSqlite3Constructor {
+  new (path: string): PrunableEmbeddingDatabase & { close(): void };
 }
 
 interface ExecFileOptions {
@@ -519,7 +534,7 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Enable local bridge")
-      .setDesc("Starts a read-only HTTP bridge on 127.0.0.1 after Obsidian has loaded.")
+      .setDesc("Starts the HTTP bridge on 127.0.0.1 after Obsidian has loaded.")
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.bridgeEnabled).onChange(async (value) => {
           this.plugin.settings.bridgeEnabled = value;
@@ -528,6 +543,45 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
           this.display();
         })
       );
+
+    new Setting(section)
+      .setName("Enable write tools")
+      .setDesc("Allows mcp clients with this bridge token to create and edit non-excluded Markdown notes. Keep disabled unless you trust the connected client.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.writeToolsEnabled).onChange(async (value) => {
+          this.plugin.settings.writeToolsEnabled = value;
+          await this.plugin.saveSettings();
+          this.display();
+        })
+      );
+
+    new Setting(section)
+      .setName("Auto-prune embeddings")
+      .setDesc("Automatically removes stale cached embedding vectors after writes and index refreshes. This keeps the local sqlite cache tidy.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.autoPruneEmbeddings).onChange(async (value) => {
+          this.plugin.settings.autoPruneEmbeddings = value;
+          await this.plugin.saveSettings();
+          this.display();
+        })
+      )
+      .addButton((button) => {
+        const dbPath = getIndexDatabasePath(this.plugin);
+        button
+          .setButtonText("Prune now")
+          .setTooltip(dbPath ? "Remove stale cached embedding vectors now." : "Plugin folder unavailable.")
+          .setDisabled(!dbPath)
+          .onClick(async () => {
+            try {
+              await withBusyButton(button, "Pruning", "Prune now", async () => {
+                const result = await pruneEmbeddingsFromSettings(this.plugin);
+                new Notice(formatPruneNotice(result));
+              });
+            } catch (error) {
+              new Notice(error instanceof Error ? error.message : String(error));
+            }
+          });
+      });
 
     new Setting(section)
       .setName("Loopback port")
@@ -892,7 +946,7 @@ function renderHeader(containerEl: HTMLElement): void {
   const header = containerEl.createDiv({ cls: "obsidian-mcp-header" });
   header.createDiv({ text: "Mcp vault bridge", cls: "obsidian-mcp-title" });
   header.createEl("p", {
-    text: "Expose your vault to local mcp clients through a read-only bridge. Returned note snippets can be sent to the model provider used by that client, so keep private areas excluded.",
+    text: "Expose your vault to local mcp clients through a read-only-by-default bridge. Returned note snippets can be sent to the model provider used by that client, so keep private areas excluded.",
     cls: "obsidian-mcp-muted"
   });
 }
@@ -1358,6 +1412,58 @@ function getPluginFilesystemDirectory(plugin: ObsidianMcpPlugin): string | null 
 function getMcpServerPath(plugin: ObsidianMcpPlugin): string | null {
   const pluginDirectory = getPluginFilesystemDirectory(plugin);
   return pluginDirectory ? joinFilesystemPath(pluginDirectory, "mcp-server.cjs") : null;
+}
+
+function getIndexDatabasePath(plugin: ObsidianMcpPlugin): string | null {
+  const pluginDirectory = getPluginFilesystemDirectory(plugin);
+  return pluginDirectory ? joinFilesystemPath(pluginDirectory, "index.sqlite") : null;
+}
+
+async function pruneEmbeddingsFromSettings(plugin: ObsidianMcpPlugin): Promise<PruneEmbeddingsResult> {
+  const dbPath = getIndexDatabasePath(plugin);
+  if (!dbPath) {
+    throw new Error("Plugin folder unavailable. Use Obsidian desktop with a filesystem vault.");
+  }
+  if (!(await fileExists(dbPath))) {
+    throw new Error("Index database is not ready yet. Run refresh_index first.");
+  }
+
+  const pluginDirectory = getPluginFilesystemDirectory(plugin);
+  if (!pluginDirectory) {
+    throw new Error("Plugin folder unavailable. Use Obsidian desktop with a filesystem vault.");
+  }
+  const Database = loadRuntimeSqlite(pluginDirectory);
+  const db = new Database(dbPath);
+  try {
+    return pruneOrphanedEmbeddingsInDatabase(db);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("no such table")) {
+      throw new Error("Index database is not ready yet. Run refresh_index first.");
+    }
+    throw error;
+  } finally {
+    db.close();
+  }
+}
+
+function loadRuntimeSqlite(pluginDirectory: string): BetterSqlite3Constructor {
+  const nodeModule = loadNodeModule<NodeModule>("module");
+  if (!nodeModule) {
+    throw new Error("Node module loader is not available inside Obsidian.");
+  }
+  const requireFromRuntime = nodeModule.createRequire(joinFilesystemPath(pluginDirectory, "package.json"));
+  try {
+    return requireFromRuntime("better-sqlite3") as BetterSqlite3Constructor;
+  } catch {
+    throw new Error("SQLite runtime is missing. Click Install SQLite runtime.");
+  }
+}
+
+function formatPruneNotice(result: PruneEmbeddingsResult): string {
+  return result.deletedEmbeddings > 0
+    ? `Pruned ${result.deletedEmbeddings} stale embedding vector(s).`
+    : "No stale embedding vectors found.";
 }
 
 function joinFilesystemPath(...parts: string[]): string {

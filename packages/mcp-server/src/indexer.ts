@@ -1,3 +1,4 @@
+import type { PruneEmbeddingsResult } from "@obsidian-mcp/shared";
 import type { BridgeClient } from "./bridge-client.js";
 import type { VaultDatabase } from "./database.js";
 import { backfillEmbeddings, type EmbeddingClient } from "./embeddings.js";
@@ -5,6 +6,12 @@ import { backfillEmbeddings, type EmbeddingClient } from "./embeddings.js";
 export interface RefreshResult {
   indexedNotes: number;
   embeddingChunks: number;
+  maintenance?: {
+    prunedEmbeddings: number;
+    orphanedEmbeddingsRemaining: number;
+    estimatedBytesFreed: number;
+    summary: string;
+  };
 }
 
 export interface IndexerStatus {
@@ -21,7 +28,8 @@ export class VaultIndexer {
   constructor(
     private readonly bridge: BridgeClient,
     private readonly db: VaultDatabase,
-    private readonly embeddings: EmbeddingClient
+    private readonly embeddings: EmbeddingClient,
+    private readonly autoPruneEmbeddings = true
   ) {}
 
   async refresh(): Promise<RefreshResult> {
@@ -87,9 +95,23 @@ export class VaultIndexer {
       }
     }
 
+    const maintenance = this.autoPruneEmbeddings ? formatMaintenance(this.db.pruneOrphanedEmbeddings()) : undefined;
     return {
       indexedNotes: notes.length,
-      embeddingChunks
+      embeddingChunks,
+      maintenance
     };
   }
+}
+
+function formatMaintenance(result: PruneEmbeddingsResult): RefreshResult["maintenance"] {
+  return {
+    prunedEmbeddings: result.deletedEmbeddings,
+    orphanedEmbeddingsRemaining: result.orphanedAfterCount,
+    estimatedBytesFreed: result.estimatedBytesFreed,
+    summary:
+      result.deletedEmbeddings > 0
+        ? `Pruned ${result.deletedEmbeddings} orphaned embedding vector(s).`
+        : "No orphaned embedding vectors to prune."
+  };
 }

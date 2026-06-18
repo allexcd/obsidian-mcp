@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import type { SearchResult } from "@obsidian-mcp/shared";
+import type { SearchResult, WriteNoteResponse } from "@obsidian-mcp/shared";
 import type { IndexedNote, IndexStats } from "./database.js";
 import type { McpRuntime } from "./mcp.js";
-import { retrieveVaultQuestion } from "./mcp.js";
+import { indexWrittenNote, retrieveVaultQuestion } from "./mcp.js";
 
 const indexStats: IndexStats = {
   noteCount: 2,
   chunkCount: 4,
   embeddingCount: 4,
+  orphanedEmbeddingCount: 0,
   lastIndexedAt: "2026-01-01T00:00:00.000Z"
 };
 
@@ -101,6 +102,53 @@ describe("retrieveVaultQuestion", () => {
   });
 });
 
+describe("indexWrittenNote", () => {
+  it("updates the local note index after a successful write", () => {
+    const upsertNote = vi.fn();
+    const runtime = createRuntime({
+      embeddingsEnabled: false,
+      stats: indexStats,
+      upsertNote
+    });
+
+    const response = createWriteResponse("Notes/New.md");
+    const result = indexWrittenNote(runtime, response);
+
+    expect(upsertNote).toHaveBeenCalledWith(response.note);
+    expect(mockCalls(runtime.db, "pruneOrphanedEmbeddings")).toHaveLength(1);
+    expect(result.operation).toBe("create");
+    expect(result.maintenance?.prunedEmbeddings).toBe(0);
+    expect(result.hint).toBeUndefined();
+  });
+
+  it("returns an embedding refresh hint when embeddings are enabled", () => {
+    const runtime = createRuntime({
+      embeddingsEnabled: true,
+      stats: indexStats,
+      upsertNote: vi.fn()
+    });
+
+    const result = indexWrittenNote(runtime, createWriteResponse("Notes/New.md"));
+
+    expect(result.hint).toContain("refresh_index");
+  });
+
+  it("skips automatic pruning when disabled", () => {
+    const runtime = createRuntime({
+      embeddingsEnabled: true,
+      autoPruneEmbeddings: false,
+      stats: indexStats,
+      upsertNote: vi.fn()
+    });
+
+    const result = indexWrittenNote(runtime, createWriteResponse("Notes/New.md"));
+
+    expect(mockCalls(runtime.db, "pruneOrphanedEmbeddings")).toHaveLength(0);
+    expect(result.maintenance).toBeUndefined();
+    expect(result.hint).toContain("prune_embeddings");
+  });
+});
+
 function createRuntime(options: {
   embeddingsEnabled: boolean;
   stats: IndexStats;
@@ -108,6 +156,8 @@ function createRuntime(options: {
   searchFts?: () => SearchResult[];
   semanticSearch?: () => SearchResult[];
   listNotes?: () => IndexedNote[];
+  upsertNote?: (note: WriteNoteResponse["note"]) => void;
+  autoPruneEmbeddings?: boolean;
 }): McpRuntime {
   return {
     config: {
@@ -117,6 +167,8 @@ function createRuntime(options: {
       dbPathSource: "env",
       maxResults: 20,
       autoIndex: true,
+      autoPruneEmbeddings: options.autoPruneEmbeddings ?? true,
+      autoPruneEmbeddingsSource: "bridge",
       embeddings: {
         enabled: options.embeddingsEnabled,
         baseUrl: options.embeddingsEnabled ? "http://127.0.0.1:1234/v1" : null,
@@ -130,7 +182,16 @@ function createRuntime(options: {
       stats: () => options.stats,
       searchFts: options.searchFts ?? (() => []),
       semanticSearch: options.semanticSearch ?? (() => []),
-      listNotes: options.listNotes ?? (() => [])
+      listNotes: options.listNotes ?? (() => []),
+      upsertNote: options.upsertNote ?? (() => undefined),
+      pruneOrphanedEmbeddings: vi.fn(() => ({
+        beforeCount: 0,
+        afterCount: 0,
+        orphanedBeforeCount: 0,
+        orphanedAfterCount: 0,
+        deletedEmbeddings: 0,
+        estimatedBytesFreed: 0
+      }))
     } as unknown as McpRuntime["db"],
     embeddings: {
       enabled: options.embeddingsEnabled,
@@ -142,4 +203,42 @@ function createRuntime(options: {
       status: () => ({ indexing: false, lastError: null })
     } as unknown as McpRuntime["indexer"]
   };
+}
+
+function createWriteResponse(path: string): WriteNoteResponse {
+  return {
+    operation: "create",
+    note: {
+      path,
+      title: "New",
+      mtime: 1,
+      size: 7,
+      tags: [],
+      aliases: [],
+      frontmatter: {},
+      content: "content",
+      truncated: false,
+      metadata: {
+        path,
+        title: "New",
+        basename: "New",
+        extension: "md",
+        stat: {
+          ctime: 1,
+          mtime: 1,
+          size: 7
+        },
+        frontmatter: {},
+        tags: [],
+        aliases: [],
+        outlinks: [],
+        embeds: [],
+        backlinks: []
+      }
+    }
+  };
+}
+
+function mockCalls<T extends object>(object: T, key: keyof T): unknown[][] {
+  return (object[key] as { mock: { calls: unknown[][] } }).mock.calls;
 }

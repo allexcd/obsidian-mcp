@@ -17,6 +17,8 @@ export interface ServerConfig {
   dbPathSource: "env" | "bridge";
   maxResults: number;
   autoIndex: boolean;
+  autoPruneEmbeddings: boolean;
+  autoPruneEmbeddingsSource: "env" | "bridge";
   embeddings: EmbeddingConfig;
 }
 
@@ -28,6 +30,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     dbPathSource: env.OBSIDIAN_MCP_DB ? "env" : "bridge",
     maxResults: clampNumber(env.OBSIDIAN_MCP_MAX_RESULTS, DEFAULT_PAGE_LIMIT, 1, 100),
     autoIndex: parseEnabled(env.OBSIDIAN_MCP_AUTO_INDEX, true),
+    autoPruneEmbeddings: parseEnabled(env.OBSIDIAN_MCP_AUTO_PRUNE_EMBEDDINGS, true),
+    autoPruneEmbeddingsSource: env.OBSIDIAN_MCP_AUTO_PRUNE_EMBEDDINGS === undefined ? "bridge" : "env",
     embeddings: {
       enabled: parseEnabled(env.OBSIDIAN_MCP_EMBEDDINGS, false),
       baseUrl: env.OBSIDIAN_MCP_EMBEDDING_BASE_URL ?? null,
@@ -39,11 +43,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
 }
 
 export async function resolveRuntimeConfig(config: ServerConfig, bridge: BridgeClient): Promise<ServerConfig & { dbPath: string }> {
+  const status = await bridge.status();
+  const autoPruneEmbeddings =
+    config.autoPruneEmbeddingsSource === "env" ? config.autoPruneEmbeddings : status.autoPruneEmbeddings;
   if (config.dbPath) {
-    return { ...config, dbPath: config.dbPath };
+    return { ...config, dbPath: config.dbPath, autoPruneEmbeddings };
   }
 
-  const status = await bridge.status();
   const dbPath = status.pluginDirectory.defaultDatabasePath;
   if (!dbPath) {
     throw new Error(
@@ -51,7 +57,7 @@ export async function resolveRuntimeConfig(config: ServerConfig, bridge: BridgeC
     );
   }
 
-  return { ...config, dbPath, dbPathSource: "bridge" };
+  return { ...config, dbPath, dbPathSource: "bridge", autoPruneEmbeddings };
 }
 
 function expandHome(path: string): string {

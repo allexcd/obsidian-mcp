@@ -12,7 +12,7 @@ async function main(): Promise<void> {
   const runtimeConfig = await resolveRuntimeConfig(config, bridge);
   const db = new VaultDatabase(runtimeConfig.dbPath);
   const embeddings = new EmbeddingClient(config.embeddings);
-  const indexer = new VaultIndexer(bridge, db, embeddings);
+  const indexer = new VaultIndexer(bridge, db, embeddings, runtimeConfig.autoPruneEmbeddings);
 
   await startMcpServer({ config: runtimeConfig, bridge, db, embeddings, indexer });
 }

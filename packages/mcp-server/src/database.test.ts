@@ -27,6 +27,40 @@ describe("VaultDatabase", () => {
     expect(db.getNote("B.md")?.content).toBe("two");
     db.close();
   });
+
+  it("prunes orphaned embeddings while preserving current embeddings", () => {
+    const db = new VaultDatabase(join(mkdtempSync(join(tmpdir(), "obsidian-mcp-")), "index.sqlite"));
+    db.replaceNotes([makeNote("A.md", "# A\nold content", [])]);
+    const [oldChunk] = db.chunksMissingEmbeddings("test", "model", 10);
+    expect(oldChunk).toBeDefined();
+    db.upsertEmbedding(oldChunk!.contentHash, "test", "model", [1, 0, 0]);
+
+    db.replaceNotes([makeNote("A.md", "# A\nnew content", [])]);
+    const [newChunk] = db.chunksMissingEmbeddings("test", "model", 10);
+    expect(newChunk).toBeDefined();
+    db.upsertEmbedding(newChunk!.contentHash, "test", "model", [0, 1, 0]);
+
+    expect(db.stats()).toMatchObject({
+      embeddingCount: 2,
+      orphanedEmbeddingCount: 1
+    });
+
+    const result = db.pruneOrphanedEmbeddings();
+
+    expect(result).toMatchObject({
+      beforeCount: 2,
+      afterCount: 1,
+      orphanedBeforeCount: 1,
+      orphanedAfterCount: 0,
+      deletedEmbeddings: 1
+    });
+    expect(result.estimatedBytesFreed).toBeGreaterThan(0);
+    expect(db.stats()).toMatchObject({
+      embeddingCount: 1,
+      orphanedEmbeddingCount: 0
+    });
+    db.close();
+  });
 });
 
 function makeNote(path: string, content: string, tags: string[]): VaultNote {
@@ -55,4 +89,3 @@ function makeNote(path: string, content: string, tags: string[]): VaultNote {
     }
   };
 }
-

@@ -3,7 +3,7 @@
   "name": "MCP Vault Bridge",
   "version": "0.4.3",
   "minAppVersion": "1.8.0",
-  "description": "Read-only, exclusion-based local bridge for using vault notes through MCP clients.",
+  "description": "Read-only by default, exclusion-based local bridge for using vault notes through MCP clients.",
   "author": "allexcd",
   "authorUrl": "https://github.com/allexcd",
   "isDesktopOnly": true
