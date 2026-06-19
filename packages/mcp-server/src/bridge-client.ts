@@ -63,6 +63,10 @@ export class BridgeClient {
     return this.request<WriteNoteResponse>("/notes/rewrite", { path, content });
   }
 
+  async setNoteProperties(path: string, properties: Record<string, unknown>): Promise<WriteNoteResponse> {
+    return this.request<WriteNoteResponse>("/notes/properties", { path, properties });
+  }
+
   private async request<T>(path: string, body: unknown): Promise<T> {
     if (!this.token) {
       throw new Error("OBSIDIAN_MCP_TOKEN is required. Copy it from the Obsidian plugin settings.");

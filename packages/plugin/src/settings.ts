@@ -1582,25 +1582,140 @@ export async function resolveRuntimeCommand(
 }
 
 export async function resolveClientNodeCommand(plugin: ObsidianMcpPlugin): Promise<CommandStatus> {
+  const pluginDirectory = getPluginFilesystemDirectory(plugin);
+  const sqliteRuntimePath = pluginDirectory
+    ? joinFilesystemPath(pluginDirectory, "node_modules", "better-sqlite3", "build", "Release", "better_sqlite3.node")
+    : null;
+  const shouldValidateSqlite = Boolean(pluginDirectory && sqliteRuntimePath && (await fileExists(sqliteRuntimePath)));
   const override = plugin.settings.nodeCommandOverride.trim();
   if (override) {
     const overrideStatus = await execFileAsync(override, ["--version"], { timeout: 5_000 });
     if (overrideStatus.ok) {
+      const compatibleOverride = shouldValidateSqlite
+        ? await validateSqliteNodeCommand(pluginDirectory!, overrideStatus)
+        : overrideStatus;
+      if (!compatibleOverride.ok) {
+        return {
+          ...compatibleOverride,
+          command: override,
+          source: "override",
+          detail: `Node.js override is not compatible with the installed SQLite runtime: ${compatibleOverride.detail}`
+        };
+      }
       return {
-        ...overrideStatus,
+        ...compatibleOverride,
         command: override,
         source: "override",
-        detail: `found via override: ${override} (${overrideStatus.detail})`
+        detail: `found via override: ${override} (${compatibleOverride.detail})`
       };
     }
   }
 
   const shell = await resolveCommandThroughShell("node", ["--version"]);
   if (shell.ok) {
+    if (shouldValidateSqlite) {
+      const compatible = await findSqliteCompatibleNodeCommand(pluginDirectory!, shell);
+      if (compatible.ok) {
+        return compatible;
+      }
+    }
     return shell;
   }
 
-  return resolveRuntimeCommand(plugin, "node", ["--version"], "");
+  const runtime = await resolveRuntimeCommand(plugin, "node", ["--version"], "");
+  if (runtime.ok && shouldValidateSqlite) {
+    const compatible = await validateSqliteNodeCommand(pluginDirectory!, runtime);
+    if (compatible.ok) {
+      return {
+        ...compatible,
+        source: runtime.source,
+        envPath: runtime.envPath,
+        detail: `found SQLite-compatible Node.js: ${compatible.command} (${compatible.detail})`
+      };
+    }
+  }
+  return runtime;
+}
+
+async function findSqliteCompatibleNodeCommand(pluginDirectory: string, shellStatus: CommandStatus): Promise<CommandStatus> {
+  const candidates = uniqueStrings([
+    shellStatus.command,
+    ...nodeCommandsFromPath(shellStatus.envPath)
+  ]);
+  const failures: string[] = [];
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    const status = await validateSqliteNodeCommand(pluginDirectory, {
+      ...shellStatus,
+      command: candidate
+    });
+    if (status.ok) {
+      return {
+        ...status,
+        source: "shell",
+        envPath: shellStatus.envPath,
+        detail: `found SQLite-compatible Node.js via shell: ${candidate} (${status.detail})`
+      };
+    }
+    failures.push(`${candidate}: ${status.detail}`);
+  }
+
+  return {
+    ok: false,
+    detail: `No shell-resolved Node.js command could load the installed SQLite runtime. ${failures.slice(0, 3).join("; ")}`
+  };
+}
+
+async function validateSqliteNodeCommand(pluginDirectory: string, status: CommandStatus): Promise<CommandStatus> {
+  const command = status.command;
+  if (!command) {
+    return { ok: false, detail: "No Node.js command was available to validate." };
+  }
+  const packageJsonPath = joinFilesystemPath(pluginDirectory, "package.json");
+  const script = [
+    "const { createRequire } = require('module');",
+    "const req = createRequire(process.argv[1]);",
+    "req('better-sqlite3');",
+    "console.log(process.version + ' abi ' + process.versions.modules);"
+  ].join(" ");
+  const result = await execFileAsync(command, ["-e", script, packageJsonPath], {
+    cwd: pluginDirectory,
+    env: status.envPath ? { ...process.env, PATH: status.envPath } : process.env,
+    timeout: 5_000
+  });
+  if (!result.ok) {
+    return {
+      ok: false,
+      command,
+      detail: result.detail,
+      stdout: result.stdout,
+      stderr: result.stderr
+    };
+  }
+  return {
+    ...result,
+    command,
+    detail: result.stdout || result.detail
+  };
+}
+
+function nodeCommandsFromPath(envPath: string | undefined): string[] {
+  if (!envPath) {
+    return [];
+  }
+  const delimiter = process.platform === "win32" ? ";" : ":";
+  const executable = process.platform === "win32" ? "node.exe" : "node";
+  return envPath
+    .split(delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => joinFilesystemPath(entry, executable));
+}
+
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
 }
 
 async function resolveCommandThroughShell(command: "node" | "npm", args: readonly string[]): Promise<CommandStatus> {

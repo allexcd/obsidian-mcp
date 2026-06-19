@@ -117,11 +117,13 @@ describe("indexWrittenNote", () => {
     expect(upsertNote).toHaveBeenCalledWith(response.note);
     expect(mockCalls(runtime.db, "pruneOrphanedEmbeddings")).toHaveLength(1);
     expect(result.operation).toBe("create");
+    expect(result.status).toBe("success");
+    expect(result.completionGuidance.nextAction).toContain("answer the user now");
     expect(result.maintenance?.prunedEmbeddings).toBe(0);
     expect(result.hint).toBeUndefined();
   });
 
-  it("returns an embedding refresh hint when embeddings are enabled", () => {
+  it("returns optional embedding maintenance when embeddings are enabled", () => {
     const runtime = createRuntime({
       embeddingsEnabled: true,
       stats: indexStats,
@@ -130,7 +132,10 @@ describe("indexWrittenNote", () => {
 
     const result = indexWrittenNote(runtime, createWriteResponse("Notes/New.md"));
 
+    expect(result.completionGuidance.nextAction).toContain("answer the user now");
+    expect(result.completionGuidance.embeddingMaintenance).toContain("Optional");
     expect(result.hint).toContain("refresh_index");
+    expect(result.hint).toContain("edit is complete");
   });
 
   it("skips automatic pruning when disabled", () => {
@@ -145,6 +150,7 @@ describe("indexWrittenNote", () => {
 
     expect(mockCalls(runtime.db, "pruneOrphanedEmbeddings")).toHaveLength(0);
     expect(result.maintenance).toBeUndefined();
+    expect(result.completionGuidance.embeddingMaintenance).toContain("Optional");
     expect(result.hint).toContain("prune_embeddings");
   });
 });

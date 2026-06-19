@@ -154,6 +154,8 @@ Write tools only operate on regular Markdown notes that are inside the current v
 
 `create_note` is the only tool that creates Markdown files. Other write tools require an existing included note. File deletion is not exposed.
 
+Successful write tools return the current post-write `note.content` plus completion guidance for the MCP host. Once that content matches the requested edit, the host should answer the user instead of continuing to search or rewrite. If embeddings are enabled, refreshing the index after a write is optional maintenance for immediate semantic search freshness; it is not required to complete the note edit.
+
 ## Vault Scope & Exclusions
 
 The plugin scans the vault through Obsidian and shows detected folders, files, and tags in its settings. Regular Markdown notes are included by default.
@@ -193,6 +195,7 @@ The SQLite file is a rebuildable cache, not the source of truth. If `index.sqlit
 | `create_note` | Create a new non-excluded Markdown note; can overwrite only when explicitly requested |
 | `append_note` | Append Markdown content to an existing included note |
 | `replace_note_text` | Replace exact text in an existing included note; duplicate matches require `occurrenceIndex` |
+| `set_note_properties` | Set Obsidian Properties/frontmatter on an existing included note |
 | `delete_note_text` | Delete exact text from an existing included note; duplicate matches require `occurrenceIndex` |
 | `rewrite_note` | Replace all content in an existing included note; empty content is allowed |
 

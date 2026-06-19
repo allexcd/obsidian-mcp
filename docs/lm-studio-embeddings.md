@@ -82,6 +82,7 @@ Find notes related to Projects/My Project.md.
 |---|---|
 | `args` path starts with `.lmstudio/extensions/...` | The path is relative. Use the full absolute path to `mcp-server.cjs`. |
 | `Cannot find module 'better-sqlite3'` | SQLite runtime is missing. In Obsidian plugin settings: **Check runtime → Install SQLite runtime**. Requires Node.js 20+. |
+| `NODE_MODULE_VERSION` mismatch for `better-sqlite3.node` | LM Studio is launching the MCP server with a different Node.js major version than the one that installed SQLite. Set `command` in `mcp.json` to the compatible Node path shown in Obsidian's MCP Clients section, or rerun **Install SQLite runtime** with the Node version you want to use. |
 | `node` command not found | Install Node.js 20+ or set `command` to the absolute path of the `node` executable. |
 | MCP server disconnected in LM Studio | Confirm `mcp-server.cjs` exists at the configured path. Run `npm run plugin:install -- --vault "/path/to/vault"` to reinstall. |
 | MCP server cannot reach Obsidian | Keep Obsidian open with the plugin enabled. Bridge must be running on `127.0.0.1:27125`. |
