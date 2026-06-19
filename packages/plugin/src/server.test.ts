@@ -137,6 +137,30 @@ describe("plugin bridge write routes", () => {
     expect(file?.content).toBe("# Article\nBody");
   });
 
+  it("rolls back property writes that fail post-write scope validation", async () => {
+    const port = await getFreePort();
+    const original = "# Article\nBody";
+    const { plugin, file, vault } = createPlugin({
+      port,
+      excludedTags: ["private"],
+      files: [{ path: "Notes/Article.md", content: original }]
+    });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/notes/properties", {
+      path: "Notes/Article.md",
+      properties: {
+        summary: "#private"
+      }
+    });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ error: "Written note properties would be excluded by the current vault scope." });
+    expect(vault.modify).toHaveBeenCalledWith(file, original);
+    expect(file?.content).toBe(original);
+  });
+
   it("repairs malformed existing frontmatter when setting note properties", async () => {
     const port = await getFreePort();
     const { plugin, file } = createPlugin({

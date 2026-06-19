@@ -426,6 +426,7 @@ async function routeSetNoteProperties(
   }
 
   try {
+    const previous = await plugin.app.vault.cachedRead(file);
     await plugin.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, JsonValue>) => {
       for (const [key, value] of Object.entries(properties)) {
         if (value === undefined) {
@@ -436,6 +437,7 @@ async function routeSetNoteProperties(
     });
     const content = await plugin.app.vault.cachedRead(file);
     if (!isContentAllowedAfterWrite(plugin, file.path, content)) {
+      await plugin.app.vault.modify(file, previous);
       await plugin.audit({ route, path: file.path, allowed: false, reason: "post_write_scope_denied" });
       sendJson(response, 403, { error: "Written note properties would be excluded by the current vault scope." });
       return;
