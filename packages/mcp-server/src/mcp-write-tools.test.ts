@@ -51,12 +51,21 @@ describe("MCP write tools", () => {
     await startMcpServer(createRuntime());
 
     expect(Array.from(sdkMock.registeredTools.keys())).toEqual(
-      expect.arrayContaining(["create_note", "append_note", "replace_note_text", "delete_note_text", "rewrite_note"])
+      expect.arrayContaining(["create_note", "append_note", "replace_note_text", "set_note_properties", "delete_note_text", "rewrite_note"])
     );
     expect(sdkMock.registeredTools.get("replace_note_text")?.config.inputSchema).toHaveProperty("oldText");
     expect(sdkMock.registeredTools.get("replace_note_text")?.config.inputSchema).toHaveProperty("newText");
+    expect(sdkMock.registeredTools.get("set_note_properties")?.config.inputSchema).toHaveProperty("properties");
     expect(sdkMock.registeredTools.get("delete_note_text")?.config.inputSchema).toHaveProperty("text");
     expect(sdkMock.registeredTools.get("create_note")?.config.inputSchema).toHaveProperty("overwrite");
+    expect(sdkMock.registeredTools.get("set_note_properties")?.config.description).toContain("Obsidian Properties");
+    expect(sdkMock.registeredTools.get("set_note_properties")?.config.description).toContain("template properties");
+    expect(sdkMock.registeredTools.get("set_note_properties")?.config.description).toContain("flat JSON object");
+    expect(sdkMock.registeredTools.get("replace_note_text")?.config.description).toContain("Preferred tool for partial body-text edits");
+    expect(sdkMock.registeredTools.get("replace_note_text")?.config.description).toContain("replace a template");
+    expect(sdkMock.registeredTools.get("replace_note_text")?.config.description).toContain("Do not use this tool to add or update Obsidian Properties");
+    expect(sdkMock.registeredTools.get("rewrite_note")?.config.description).toContain("Last-resort whole-note replacement tool");
+    expect(sdkMock.registeredTools.get("rewrite_note")?.config.description).toContain("For partial edits, use replace_note_text instead");
   });
 
   it("create_note calls the bridge, then updates the local index", async () => {
@@ -81,7 +90,7 @@ describe("MCP write tools", () => {
     expect(parsed.maintenance?.summary).toContain("No orphaned");
   });
 
-  it("replace_note_text preserves occurrenceIndex and returns an embedding refresh hint", async () => {
+  it("replace_note_text preserves occurrenceIndex and returns completion guidance", async () => {
     const runtime = createRuntime({ embeddingsEnabled: true });
     await startMcpServer(runtime);
 
@@ -90,11 +99,88 @@ describe("MCP write tools", () => {
       throw new Error("replace_note_text was not registered");
     }
     const result = await tool.handler({ path: "Notes/New.md", oldText: "old", newText: "new", occurrenceIndex: 1 });
-    const parsed = JSON.parse(result.content[0]!.text) as WriteNoteResponse & { hint?: string };
+    const parsed = JSON.parse(result.content[0]!.text) as WriteNoteResponse & {
+      status?: string;
+      completionGuidance?: { nextAction: string; embeddingMaintenance?: string };
+      hint?: string;
+    };
 
     expect(mockCalls(runtime.bridge, "replaceNoteText")).toEqual([["Notes/New.md", "old", "new", 1]]);
     expect(mockCalls(runtime.db, "upsertNote").length).toBeGreaterThan(0);
+    expect(parsed.status).toBe("success");
+    expect(parsed.completionGuidance?.nextAction).toContain("answer the user now");
+    expect(parsed.completionGuidance?.embeddingMaintenance).toContain("Optional");
     expect(parsed.hint).toContain("refresh_index");
+    expect(parsed.hint).toContain("edit is complete");
+  });
+
+  it("rewrite_note returns a recoverable error when path is blank", async () => {
+    const runtime = createRuntime();
+    await startMcpServer(runtime);
+
+    const tool = sdkMock.registeredTools.get("rewrite_note");
+    if (!tool) {
+      throw new Error("rewrite_note was not registered");
+    }
+    const result = await tool.handler({ path: "", content: "# Full replacement" });
+    const parsed = JSON.parse(result.content[0]!.text) as {
+      error?: { code: string; message: string };
+      guidance?: string;
+    };
+
+    expect(mockCalls(runtime.bridge, "rewriteNote")).toHaveLength(0);
+    expect(parsed.error?.code).toBe("missing_path");
+    expect(parsed.guidance).toContain("exact note path");
+    expect(parsed.guidance).toContain("path before content");
+  });
+
+  it("rewrite_note uses the last read note path when path is blank", async () => {
+    const runtime = createRuntime();
+    await startMcpServer(runtime);
+
+    const readTool = sdkMock.registeredTools.get("read_note");
+    const rewriteTool = sdkMock.registeredTools.get("rewrite_note");
+    if (!readTool || !rewriteTool) {
+      throw new Error("read_note or rewrite_note was not registered");
+    }
+
+    await readTool.handler({ path: "Notes/New.md" });
+    const result = await rewriteTool.handler({ path: "", content: "# Full replacement" });
+    const parsed = JSON.parse(result.content[0]!.text) as WriteNoteResponse & {
+      pathResolvedFrom?: string;
+    };
+
+    expect(mockCalls(runtime.bridge, "readNote")).toEqual([["Notes/New.md", undefined]]);
+    expect(mockCalls(runtime.bridge, "rewriteNote")).toEqual([["Notes/New.md", "# Full replacement"]]);
+    expect(parsed.operation).toBe("rewrite");
+    expect(parsed.pathResolvedFrom).toBe("last_read_note");
+  });
+
+  it("set_note_properties calls the bridge, then updates the local index", async () => {
+    const runtime = createRuntime();
+    await startMcpServer(runtime);
+
+    const tool = sdkMock.registeredTools.get("set_note_properties");
+    if (!tool) {
+      throw new Error("set_note_properties was not registered");
+    }
+    const properties = {
+      title: "Bhutan PM",
+      summary: null,
+      image: "[[image]]",
+      tags: []
+    };
+    const result = await tool.handler({ path: "Notes/New.md", properties });
+    const parsed = JSON.parse(result.content[0]!.text) as WriteNoteResponse & {
+      status?: string;
+      index: { noteCount: number };
+    };
+
+    expect(mockCalls(runtime.bridge, "setNoteProperties")).toEqual([["Notes/New.md", properties]]);
+    expect(mockCalls(runtime.db, "upsertNote").length).toBeGreaterThan(0);
+    expect(parsed.operation).toBe("properties");
+    expect(parsed.status).toBe("success");
+    expect(parsed.index.noteCount).toBe(1);
   });
 
   it("registers prune_embeddings and returns cleanup counts", async () => {
@@ -160,16 +246,18 @@ function createRuntime(options: { embeddingsEnabled?: boolean; orphanedEmbedding
             includedNoteCount: 1,
             excludedNoteCount: 0
           },
-          includedNoteCount: 1,
-          maxNoteBytes: 120000,
-          auditEnabled: true
+      includedNoteCount: 1,
+      maxNoteBytes: 120000,
+      auditEnabled: true
         })
       ),
+      readNote: vi.fn(() => Promise.resolve(note)),
       createNote: vi.fn(() => Promise.resolve({ operation: "create", note })),
       appendNote: vi.fn(() => Promise.resolve({ operation: "append", note })),
       replaceNoteText: vi.fn(() => Promise.resolve({ operation: "replace", note })),
       deleteNoteText: vi.fn(() => Promise.resolve({ operation: "delete_text", note })),
-      rewriteNote: vi.fn(() => Promise.resolve({ operation: "rewrite", note }))
+      rewriteNote: vi.fn(() => Promise.resolve({ operation: "rewrite", note })),
+      setNoteProperties: vi.fn(() => Promise.resolve({ operation: "properties", note }))
     } as unknown as McpRuntime["bridge"],
     db: {
       stats: vi.fn(() => ({

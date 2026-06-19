@@ -7,6 +7,7 @@ import {
   isPathIncluded,
   makeSnippet,
   NoteEditError,
+  normalizeTag,
   normalizeVaultScope,
   normalizeVaultPath,
   parseMarkdown,
@@ -132,6 +133,9 @@ async function handleRequest(
       return;
     case "/notes/rewrite":
       await routeRewriteNote(plugin, response, route, body);
+      return;
+    case "/notes/properties":
+      await routeSetNoteProperties(plugin, response, route, body);
       return;
     default:
       await plugin.audit({ route, allowed: false, reason: "unknown_route" });
@@ -390,6 +394,78 @@ async function routeRewriteNote(
   await routeMutateExistingNote(plugin, response, route, body, "rewrite", () => stringField(body.content));
 }
 
+async function routeSetNoteProperties(
+  plugin: ObsidianMcpPlugin,
+  response: ServerResponse,
+  route: string,
+  body: JsonRecord
+): Promise<void> {
+  const rawPath = stringField(body.path);
+  if (!(await ensureWritesEnabled(plugin, response, route, rawPath))) {
+    return;
+  }
+
+  const file = getAllowedFileByPath(plugin, body.path);
+  if (!file) {
+    await plugin.audit({ route, path: rawPath, allowed: false, reason: "denied_or_missing" });
+    sendJson(response, 404, { error: "Writable note not found." });
+    return;
+  }
+
+  const properties = jsonRecordField(body.properties);
+  if (!properties) {
+    await plugin.audit({ route, path: file.path, allowed: false, reason: "invalid_properties" });
+    sendJson(response, 400, { error: "properties must be a JSON object." });
+    return;
+  }
+
+  if (propertiesIntroduceExcludedTags(plugin, properties)) {
+    await plugin.audit({ route, path: file.path, allowed: false, reason: "post_write_scope_denied" });
+    sendJson(response, 403, { error: "Written note properties would be excluded by the current vault scope." });
+    return;
+  }
+
+  try {
+    const previous = await plugin.app.vault.cachedRead(file);
+    await plugin.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, JsonValue>) => {
+      for (const [key, value] of Object.entries(properties)) {
+        if (value === undefined) {
+          continue;
+        }
+        frontmatter[key] = value;
+      }
+    });
+    const content = await plugin.app.vault.cachedRead(file);
+    if (!isContentAllowedAfterWrite(plugin, file.path, content)) {
+      await plugin.app.vault.modify(file, previous);
+      await plugin.audit({ route, path: file.path, allowed: false, reason: "post_write_scope_denied" });
+      sendJson(response, 403, { error: "Written note properties would be excluded by the current vault scope." });
+      return;
+    }
+    await sendWriteResponse(plugin, response, route, "properties", file, content);
+  } catch (error) {
+    if (!isYamlParseError(error)) {
+      await plugin.audit({ route, path: file.path, allowed: false, reason: "write_failed" });
+      sendJson(response, 500, { error: formatWriteError(error) });
+      return;
+    }
+    const existing = await plugin.app.vault.cachedRead(file);
+    const next = replaceFrontmatterBlock(existing, properties);
+    if (!isContentWithinLimit(next, plugin.settings.maxNoteBytes)) {
+      await plugin.audit({ route, path: file.path, allowed: false, reason: "content_too_large" });
+      sendJson(response, 413, { error: `Content exceeds maximum note size of ${plugin.settings.maxNoteBytes} bytes.` });
+      return;
+    }
+    if (!isContentAllowedAfterWrite(plugin, file.path, next)) {
+      await plugin.audit({ route, path: file.path, allowed: false, reason: "post_write_scope_denied" });
+      sendJson(response, 403, { error: "Written note properties would be excluded by the current vault scope." });
+      return;
+    }
+    await plugin.app.vault.modify(file, next);
+    await sendWriteResponse(plugin, response, route, "properties", file, next);
+  }
+}
+
 async function routeMutateExistingNote(
   plugin: ObsidianMcpPlugin,
   response: ServerResponse,
@@ -642,6 +718,91 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
 
 function stringField(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function jsonRecordField(value: unknown): Record<string, JsonValue> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record: Record<string, JsonValue> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (isJsonValue(entry)) {
+      record[key] = entry;
+    }
+  }
+  return record;
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null || ["string", "number", "boolean"].includes(typeof value)) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.every(isJsonValue);
+  }
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).every(isJsonValue);
+  }
+  return false;
+}
+
+function propertiesIntroduceExcludedTags(plugin: ObsidianMcpPlugin, properties: Record<string, JsonValue>): boolean {
+  const excluded = new Set(normalizeVaultScope(plugin.settings).excludedTags.map((tag) => normalizeTag(tag)).filter(Boolean));
+  if (excluded.size === 0) {
+    return false;
+  }
+  const tags = [...stringList(properties.tags), ...stringList(properties.tag)].map((tag) => normalizeTag(tag)).filter(Boolean);
+  return tags.some((tag) => excluded.has(tag));
+}
+
+function isYamlParseError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /yaml|nested mappings|bad indentation|can not read|unexpected/i.test(message);
+}
+
+function replaceFrontmatterBlock(content: string, properties: Record<string, JsonValue>): string {
+  const body = stripExistingFrontmatterBlock(content);
+  return `---\n${serializeFrontmatter(properties)}\n---\n${body.replace(/^\r?\n/, "")}`;
+}
+
+function stripExistingFrontmatterBlock(content: string): string {
+  if (!content.startsWith("---\n") && !content.startsWith("---\r\n")) {
+    return content;
+  }
+  const match = /\r?\n---\r?\n/.exec(content.slice(3));
+  if (!match) {
+    return content;
+  }
+  return content.slice(3 + match.index + match[0].length);
+}
+
+function serializeFrontmatter(properties: Record<string, JsonValue>): string {
+  return Object.entries(properties)
+    .map(([key, value]) => `${key}: ${serializeYamlValue(value)}`.trimEnd())
+    .join("\n");
+}
+
+function serializeYamlValue(value: JsonValue): string {
+  if (value === null) {
+    return "";
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0 ? "[]" : `[${value.map((item) => serializeYamlScalar(item)).join(", ")}]`;
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return serializeYamlScalar(value);
+}
+
+function serializeYamlScalar(value: JsonValue): string {
+  if (typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return "";
 }
 
 function booleanField(value: unknown): boolean {

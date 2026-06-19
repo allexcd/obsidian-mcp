@@ -104,7 +104,7 @@ export interface BridgeAuditEntry {
 }
 
 export interface WriteNoteResponse {
-  operation: "create" | "append" | "replace" | "delete_text" | "rewrite";
+  operation: "create" | "append" | "replace" | "delete_text" | "rewrite" | "properties";
   note: VaultNote;
 }
 

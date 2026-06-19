@@ -94,6 +94,28 @@ describe("BridgeClient write methods", () => {
     });
   });
 
+  it("sends property updates to the properties route", async () => {
+    const client = new BridgeClient("http://127.0.0.1:27125", "token");
+
+    await client.setNoteProperties("Notes/A.md", {
+      title: "Article",
+      summary: null,
+      tags: []
+    });
+
+    expect(requestJsonMock).toHaveBeenCalledWith(new URL("http://127.0.0.1:27125/notes/properties"), {
+      headers: { Authorization: "Bearer token" },
+      body: {
+        path: "Notes/A.md",
+        properties: {
+          title: "Article",
+          summary: null,
+          tags: []
+        }
+      }
+    });
+  });
+
   it("surfaces write-disabled bridge errors", async () => {
     requestJsonMock.mockResolvedValueOnce({
       ok: false,
