@@ -1,4 +1,6 @@
 import type {
+  BaseFileInput,
+  BaseFileWriteResponse,
   BridgeExportResponse,
   BridgeListResponse,
   BridgeStatus,
@@ -45,6 +47,15 @@ export class BridgeClient {
 
   async createNote(path: string, content: string, overwrite: boolean): Promise<WriteNoteResponse> {
     return this.request<WriteNoteResponse>("/notes/create", { path, content, overwrite });
+  }
+
+  async createBaseFile(
+    path: string | undefined,
+    base: BaseFileInput,
+    overwrite: boolean,
+    createFolder: boolean
+  ): Promise<BaseFileWriteResponse> {
+    return this.request<BaseFileWriteResponse>("/bases/create", { path, ...base, overwrite, createFolder });
   }
 
   async appendNote(path: string, content: string): Promise<WriteNoteResponse> {

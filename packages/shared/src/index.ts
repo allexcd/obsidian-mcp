@@ -1,3 +1,4 @@
+export * from "./base.js";
 export * from "./markdown.js";
 export * from "./prune.js";
 export * from "./security.js";
