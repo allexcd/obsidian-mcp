@@ -1,7 +1,7 @@
 {
   "id": "mcp-vault-bridge",
   "name": "MCP Vault Bridge",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "minAppVersion": "1.8.0",
   "description": "Read-only by default, exclusion-based local bridge for using vault notes through MCP clients.",
   "author": "allexcd",
