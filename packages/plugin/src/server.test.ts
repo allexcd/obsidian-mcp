@@ -1,6 +1,6 @@
 import { createServer } from "node:net";
 import { request } from "node:http";
-import { TFile } from "obsidian";
+import { TFile, TFolder } from "obsidian";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type ObsidianMcpPlugin from "./main.js";
 import { createBridgeServer, type BridgeServerHandle } from "./server.js";
@@ -192,6 +192,366 @@ describe("plugin bridge write routes", () => {
       `---\ntitle: "Bhutan PM on leading the first carbon-negative nation: 'The wellbeing of our people'"\nsummary:\nimage: "[[image]]"\ntags: []\n---\n# Article`
     );
   });
+
+  it("creates a folder-scoped base file with requested table columns", async () => {
+    const port = await getFreePort();
+    const { plugin, vault, files, folders } = createPlugin({ port, folders: ["Bases"] });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/bases/create", {
+      path: "Bases/Folder X",
+      scope: { kind: "folder", folder: "Folder X" },
+      createFolder: true,
+      views: [{ type: "table", name: "Table", order: ["title", "author", "url", "file.name"] }]
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      operation: "create_base",
+      path: "Bases/Folder X.base",
+      overwritten: false,
+      createdFolders: []
+    });
+    expect(vault.create).toHaveBeenCalledWith(
+      "Bases/Folder X.base",
+      [
+        "filters:",
+        "  and:",
+        "    - and:",
+        "        - 'file.inFolder(\"Folder X\")'",
+        "    - 'file.ext != \"base\"'",
+        "views:",
+        "  - type: table",
+        "    name: Table",
+        "    order:",
+        "      - title",
+        "      - author",
+        "      - url",
+        "      - file.name",
+        ""
+      ].join("\n")
+    );
+    expect(files.get("Bases/Folder X.base")?.extension).toBe("base");
+    expect(folders.has("Bases")).toBe(true);
+  });
+
+  it("defaults folder-scoped base files inside the scoped folder", async () => {
+    const port = await getFreePort();
+    const { plugin, vault, files, folders } = createPlugin({
+      port,
+      folders: ["Articles", "Articles/Science"],
+      files: [{ path: "Articles/Science/Article.md", content: "# Article" }]
+    });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/bases/create", {
+      scope: { folder: "Articles/Science" }
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      operation: "create_base",
+      path: "Articles/Science/Science.base",
+      overwritten: false,
+      createdFolders: []
+    });
+    expect(vault.create).toHaveBeenCalledWith("Articles/Science/Science.base", expect.stringContaining('file.inFolder("Articles/Science")'));
+    expect(files.get("Articles/Science/Science.base")?.extension).toBe("base");
+    expect(folders.has("Articles/Science")).toBe(true);
+  });
+
+  it("resolves a unique folder basename instead of creating a root folder", async () => {
+    const port = await getFreePort();
+    const { plugin, vault, files, folders } = createPlugin({
+      port,
+      folders: ["Articles", "Articles/Politics"],
+      files: [{ path: "Articles/Politics/Article.md", content: "# Article" }]
+    });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/bases/create", {
+      scope: { folder: "Politics" }
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      operation: "create_base",
+      path: "Articles/Politics/Politics.base",
+      overwritten: false,
+      createdFolders: []
+    });
+    expect(vault.create).toHaveBeenCalledWith("Articles/Politics/Politics.base", expect.stringContaining('file.inFolder("Articles/Politics")'));
+    expect(vault.create).toHaveBeenCalledWith("Articles/Politics/Politics.base", expect.stringContaining('file.ext != "base"'));
+    expect(files.get("Articles/Politics/Politics.base")?.extension).toBe("base");
+    expect(folders.has("Politics")).toBe(false);
+  });
+
+  it("serializes explicit base filters, excluded paths, extensions, and view sorting", async () => {
+    const port = await getFreePort();
+    const { plugin, vault } = createPlugin({
+      port,
+      folders: ["Articles", "Articles/Politics"],
+      files: [{ path: "Articles/Politics/Article.md", content: "# Article" }]
+    });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/bases/create", {
+      scope: { folder: "Politics" },
+      filters: 'tags.contains("politics")',
+      excludePaths: ["Articles/Politics/Politics.base"],
+      includeExtensions: ["md"],
+      excludeExtensions: ["canvas"],
+      views: [
+        {
+          type: "table",
+          name: "All Politics Files",
+          order: ["file.name", "title", "author", "date", "tags"],
+          sort: [{ property: "date", direction: "DESC" }]
+        }
+      ]
+    });
+
+    expect(response.status).toBe(200);
+    const content = (response.body as { content?: string }).content ?? "";
+    expect(content).toContain('file.inFolder("Articles/Politics")');
+    expect(content).toContain('tags.contains("politics")');
+    expect(content).toContain('file.path != "Articles/Politics/Politics.base"');
+    expect(content).toContain('file.ext == "md"');
+    expect(content).toContain('file.ext != "canvas"');
+    expect(content).toContain('file.ext != "base"');
+    expect(content).toContain("sort:");
+    expect(content).toContain("property: date");
+    expect(content).toContain("direction: DESC");
+    expect(vault.create).toHaveBeenCalledWith("Articles/Politics/Politics.base", content);
+  });
+
+  it("overrides auto-derived root paths after resolving a folder basename", async () => {
+    const port = await getFreePort();
+    const { plugin, vault, files, folders } = createPlugin({
+      port,
+      folders: ["Articles", "Articles/Politics"],
+      files: [{ path: "Articles/Politics/Article.md", content: "# Article" }]
+    });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/bases/create", {
+      path: "Politics/Politics.base",
+      scope: { folder: "Politics" }
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      operation: "create_base",
+      path: "Articles/Politics/Politics.base",
+      overwritten: false,
+      createdFolders: []
+    });
+    expect(vault.create).toHaveBeenCalledWith("Articles/Politics/Politics.base", expect.stringContaining('file.inFolder("Articles/Politics")'));
+    expect(files.get("Articles/Politics/Politics.base")?.extension).toBe("base");
+    expect(folders.has("Politics")).toBe(false);
+  });
+
+  it("overrides auto-derived parent paths after resolving a folder basename", async () => {
+    const port = await getFreePort();
+    const { plugin, vault, files } = createPlugin({
+      port,
+      folders: ["Articles", "Articles/Politics"],
+      files: [{ path: "Articles/Politics/Article.md", content: "# Article" }]
+    });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/bases/create", {
+      path: "Articles/Politics.base",
+      scope: { folder: "Politics" }
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      operation: "create_base",
+      path: "Articles/Politics/Politics.base",
+      overwritten: false,
+      createdFolders: []
+    });
+    expect(vault.create).toHaveBeenCalledWith("Articles/Politics/Politics.base", expect.stringContaining('file.inFolder("Articles/Politics")'));
+    expect(files.get("Articles/Politics/Politics.base")?.extension).toBe("base");
+  });
+
+  it.each([
+    {
+      label: "topic folder basename",
+      requested: "Politics",
+      resolved: "Articles/Politics",
+      inputs: [
+        "Politics",
+        "Politics.base",
+        "Politics/Politics",
+        "Politics/Politics.base",
+        "Politics/Politics Overview.base",
+        "Articles/Politics",
+        "Articles/Politics.base",
+        "Articles/Politics Base.base",
+        "Articles/Politics files.base"
+      ]
+    },
+    {
+      label: "folder basename with spaces",
+      requested: "Nina Lakhani",
+      resolved: "Articles/Authors/Nina Lakhani",
+      inputs: [
+        "Nina Lakhani",
+        "Nina Lakhani.base",
+        "Nina Lakhani/Nina Lakhani.base",
+        "Articles/Authors/Nina Lakhani",
+        "Articles/Authors/Nina Lakhani.base",
+        "Articles/Authors/Nina Lakhani files.base"
+      ]
+    },
+    {
+      label: "hyphenated folder basename",
+      requested: "Long-Term Planning",
+      resolved: "Projects/Research/Long-Term Planning",
+      inputs: [
+        "Long-Term Planning",
+        "Long-Term Planning.base",
+        "Long-Term Planning/Long-Term Planning.base",
+        "Projects/Research/Long-Term Planning",
+        "Projects/Research/Long-Term Planning.base",
+        "Projects/Research/Long-Term Planning overview.base"
+      ]
+    }
+  ])("overrides auto-derived paths after resolving %s", async ({ requested, resolved, inputs }) => {
+    const port = await getFreePort();
+    const { plugin, vault, files, folders } = createPlugin({
+      port,
+      folders: parentFoldersForTest(resolved),
+      files: [{ path: `${resolved}/Article.md`, content: "# Article" }]
+    });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    for (const inputPath of inputs) {
+      vault.create.mockClear();
+      const response = await postJson(port, "/bases/create", {
+        path: inputPath,
+        scope: { folder: requested }
+      });
+
+      const basename = resolved.split("/").pop()!;
+      const expectedPath = `${resolved}/${basename}.base`;
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        operation: "create_base",
+        path: expectedPath,
+        overwritten: false,
+        createdFolders: []
+      });
+      expect(vault.create).toHaveBeenCalledWith(expectedPath, expect.stringContaining(`file.inFolder("${resolved}")`));
+      expect(files.get(expectedPath)?.extension).toBe("base");
+      expect(folders.has(requested)).toBe(false);
+      files.delete(expectedPath);
+    }
+  });
+
+  it("keeps deliberate custom base paths after resolving a folder basename", async () => {
+    const port = await getFreePort();
+    const { plugin, vault, files } = createPlugin({
+      port,
+      folders: ["Articles", "Articles/Politics", "Bases"],
+      files: [{ path: "Articles/Politics/Article.md", content: "# Article" }]
+    });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/bases/create", {
+      path: "Bases/Politics Overview.base",
+      scope: { folder: "Politics" }
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      operation: "create_base",
+      path: "Bases/Politics Overview.base",
+      overwritten: false,
+      createdFolders: []
+    });
+    expect(vault.create).toHaveBeenCalledWith("Bases/Politics Overview.base", expect.stringContaining('file.inFolder("Articles/Politics")'));
+    expect(files.get("Bases/Politics Overview.base")?.extension).toBe("base");
+  });
+
+  it("rejects base creation without an explicit scope", async () => {
+    const port = await getFreePort();
+    const { plugin, vault, audit } = createPlugin({ port });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/bases/create", {});
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error:
+        'Base scope is required. Resolve the user\'s intended folder or files first, or pass { kind: "vault" } only when the user explicitly asks for the whole vault.'
+    });
+    expect(vault.create).not.toHaveBeenCalled();
+    expect(audit).toHaveBeenCalledWith({
+      route: "/bases/create",
+      path: "",
+      allowed: false,
+      reason: "missing_base_scope"
+    });
+  });
+
+  it("rejects unresolved folder scopes by default", async () => {
+    const port = await getFreePort();
+    const { plugin, vault, folders } = createPlugin({ port });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/bases/create", { scope: { folder: "Politics" } });
+
+    expect(response.status).toBe(400);
+    expect((response.body as { error?: string }).error).toContain('Folder "Politics" was not found');
+    expect(vault.create).not.toHaveBeenCalled();
+    expect(vault.createFolder).not.toHaveBeenCalled();
+    expect(folders.has("Politics")).toBe(false);
+  });
+
+  it("creates missing parent folders only when explicitly requested", async () => {
+    const port = await getFreePort();
+    const { plugin, vault, folders } = createPlugin({ port });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/bases/create", {
+      path: "Bases/Projects/All",
+      scope: { kind: "vault" },
+      createFolder: true
+    });
+
+    expect(response.status).toBe(200);
+    expect((response.body as { createdFolders?: string[] }).createdFolders).toEqual(["Bases", "Bases/Projects"]);
+    expect(vault.createFolder).toHaveBeenCalledWith("Bases");
+    expect(vault.createFolder).toHaveBeenCalledWith("Bases/Projects");
+    expect(folders.has("Bases/Projects")).toBe(true);
+  });
+
+  it("rejects base file writes in excluded folders", async () => {
+    const port = await getFreePort();
+    const { plugin, vault } = createPlugin({ port, excludedFolders: ["Private"] });
+    const handle = await createBridgeServer(plugin, "token");
+    handles.push(handle);
+
+    const response = await postJson(port, "/bases/create", { path: "Private/View.base", scope: { kind: "vault" } });
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: "Writable base file path is not allowed." });
+    expect(vault.create).not.toHaveBeenCalled();
+  });
 });
 
 function postJson(port: number, path: string, body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
@@ -239,23 +599,37 @@ interface PluginFixture {
   audit: ReturnType<typeof vi.fn>;
   vault: {
     create: ReturnType<typeof vi.fn>;
+    createFolder: ReturnType<typeof vi.fn>;
     modify: ReturnType<typeof vi.fn>;
   };
+  files: Map<string, TestFile>;
+  folders: Map<string, TestFolder>;
   file: TestFile | undefined;
+}
+
+interface TestFolder {
+  path: string;
 }
 
 function createPlugin(
   options: {
     port: number;
     writeToolsEnabled?: boolean;
+    excludedFolders?: string[];
+    excludedFiles?: string[];
     excludedTags?: string[];
     frontmatterParseFails?: boolean;
+    folders?: string[];
     files?: Array<{ path: string; content: string }>;
   }
 ): PluginFixture {
   const configDir = [".", "obsidian"].join("");
   const audit = vi.fn(() => Promise.resolve());
   const files = new Map<string, TestFile>();
+  const folders = new Map<string, TestFolder>();
+  for (const folder of options.folders ?? []) {
+    folders.set(folder, makeFolder(folder));
+  }
   for (const item of options.files ?? []) {
     files.set(item.path, makeFile(item.path, item.content));
   }
@@ -263,6 +637,11 @@ function createPlugin(
     const file = makeFile(path, content);
     files.set(path, file);
     return Promise.resolve(file);
+  });
+  const createFolder = vi.fn((path: string) => {
+    const folder = makeFolder(path);
+    folders.set(path, folder);
+    return Promise.resolve(folder);
   });
   const modify = vi.fn((file: TestFile, content: string) => {
     file.content = content;
@@ -289,8 +668,8 @@ function createPlugin(
       settings: {
         bridgeEnabled: true,
         port: options.port,
-        excludedFolders: [],
-        excludedFiles: [],
+        excludedFolders: options.excludedFolders ?? [],
+        excludedFiles: options.excludedFiles ?? [],
         excludedTags: options.excludedTags ?? [],
         maxNoteBytes: 120000,
         writeToolsEnabled: options.writeToolsEnabled ?? true,
@@ -304,10 +683,11 @@ function createPlugin(
         vault: {
           configDir,
           getName: () => "Test Vault",
-          getMarkdownFiles: () => Array.from(files.values()),
-          getAbstractFileByPath: (path: string) => files.get(path) ?? null,
+          getMarkdownFiles: () => Array.from(files.values()).filter((file) => file.extension === "md"),
+          getAbstractFileByPath: (path: string) => files.get(path) ?? folders.get(path) ?? null,
           cachedRead: vi.fn((file: TestFile) => Promise.resolve(file.content)),
           create,
+          createFolder,
           modify
         },
         fileManager: {
@@ -321,7 +701,9 @@ function createPlugin(
       audit
     } as unknown as ObsidianMcpPlugin,
     audit,
-    vault: { create, modify },
+    vault: { create, createFolder, modify },
+    files,
+    folders,
     file: firstFile
   };
 }
@@ -374,18 +756,35 @@ function formatYamlValueForTest(value: unknown): string {
 }
 
 function makeFile(path: string, content: string): TestFile {
-  const basename = path.split("/").pop()?.replace(/\.md$/i, "") ?? path;
+  const filename = path.split("/").pop() ?? path;
+  const extension = filename.includes(".") ? (filename.split(".").pop() ?? "") : "md";
+  const basename = filename.replace(new RegExp(`\\.${extension}$`, "i"), "");
   const file = new TFile() as unknown as TestFile;
   file.path = path;
   file.content = content;
   file.basename = basename;
-  file.extension = "md";
+  file.extension = extension;
   file.stat = {
     ctime: 1,
     mtime: 1,
     size: content.length
   };
   return file;
+}
+
+function makeFolder(path: string): TestFolder {
+  const folder = new TFolder() as unknown as TestFolder;
+  folder.path = path;
+  return folder;
+}
+
+function parentFoldersForTest(path: string): string[] {
+  const parts = path.split("/");
+  const folders: string[] = [];
+  for (let index = 1; index <= parts.length; index += 1) {
+    folders.push(parts.slice(0, index).join("/"));
+  }
+  return folders;
 }
 
 async function getFreePort(): Promise<number> {

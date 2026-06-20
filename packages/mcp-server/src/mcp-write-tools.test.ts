@@ -51,14 +51,38 @@ describe("MCP write tools", () => {
     await startMcpServer(createRuntime());
 
     expect(Array.from(sdkMock.registeredTools.keys())).toEqual(
-      expect.arrayContaining(["create_note", "append_note", "replace_note_text", "set_note_properties", "delete_note_text", "rewrite_note"])
+      expect.arrayContaining([
+        "create_note",
+        "create_base_file",
+        "append_note",
+        "replace_note_text",
+        "set_note_properties",
+        "delete_note_text",
+        "rewrite_note"
+      ])
     );
     expect(sdkMock.registeredTools.get("replace_note_text")?.config.inputSchema).toHaveProperty("oldText");
     expect(sdkMock.registeredTools.get("replace_note_text")?.config.inputSchema).toHaveProperty("newText");
     expect(sdkMock.registeredTools.get("set_note_properties")?.config.inputSchema).toHaveProperty("properties");
     expect(sdkMock.registeredTools.get("delete_note_text")?.config.inputSchema).toHaveProperty("text");
     expect(sdkMock.registeredTools.get("create_note")?.config.inputSchema).toHaveProperty("overwrite");
+    expect(sdkMock.registeredTools.get("create_base_file")?.config.inputSchema).toHaveProperty("scope");
+    expect(sdkMock.registeredTools.get("create_base_file")?.config.inputSchema).toHaveProperty("filters");
+    expect(sdkMock.registeredTools.get("create_base_file")?.config.inputSchema).toHaveProperty("excludePaths");
+    expect(sdkMock.registeredTools.get("create_base_file")?.config.inputSchema).toHaveProperty("includeExtensions");
+    expect(sdkMock.registeredTools.get("create_base_file")?.config.inputSchema).toHaveProperty("views");
     expect(sdkMock.registeredTools.get("set_note_properties")?.config.description).toContain("Obsidian Properties");
+    expect(sdkMock.registeredTools.get("set_note_properties")?.config.description).toContain("tags, aliases, and cssclasses");
+    expect(sdkMock.registeredTools.get("set_note_properties")?.config.description).toContain("[[Note Name]]");
+    expect(sdkMock.registeredTools.get("list_notes")?.config.description).toContain("resolve user-mentioned Obsidian folders");
+    expect(sdkMock.registeredTools.get("get_note_metadata")?.config.description).toContain("Use this before editing properties");
+    expect(sdkMock.registeredTools.get("get_note_links")?.config.description).toContain("headings, or blocks");
+    expect(sdkMock.registeredTools.get("create_base_file")?.config.description).toContain("resolve the real folder/file paths first");
+    expect(sdkMock.registeredTools.get("create_base_file")?.config.description).toContain("Use scope.kind='vault' only");
+    expect(sdkMock.registeredTools.get("create_base_file")?.config.description).toContain("excludePaths");
+    expect(sdkMock.registeredTools.get("create_base_file")?.config.description).toContain("views[].sort");
+    expect(sdkMock.registeredTools.get("create_base_file")?.config.description).toContain("preserve the requested order");
+    expect(sdkMock.registeredTools.get("create_base_file")?.config.description).toContain("Does not index");
     expect(sdkMock.registeredTools.get("set_note_properties")?.config.description).toContain("template properties");
     expect(sdkMock.registeredTools.get("set_note_properties")?.config.description).toContain("flat JSON object");
     expect(sdkMock.registeredTools.get("replace_note_text")?.config.description).toContain("Preferred tool for partial body-text edits");
@@ -88,6 +112,124 @@ describe("MCP write tools", () => {
     expect(parsed.operation).toBe("create");
     expect(parsed.index.noteCount).toBe(1);
     expect(parsed.maintenance?.summary).toContain("No orphaned");
+  });
+
+  it("create_base_file calls the bridge without updating the note index", async () => {
+    const runtime = createRuntime();
+    await startMcpServer(runtime);
+
+    const tool = sdkMock.registeredTools.get("create_base_file");
+    if (!tool) {
+      throw new Error("create_base_file was not registered");
+    }
+    const result = await tool.handler({
+      path: "Bases/Reading",
+      scope: { kind: "folder", folder: "Reading" },
+      views: [{ type: "table", name: "Table", order: ["title", "author", "url"] }]
+    });
+    const parsed = JSON.parse(result.content[0]!.text) as {
+      operation: string;
+      path: string;
+      status?: string;
+      completionGuidance?: { nextAction: string };
+    };
+
+    expect(mockCalls(runtime.bridge, "createBaseFile")).toEqual([
+      [
+        "Bases/Reading",
+        {
+          scope: { kind: "folder", folder: "Reading" },
+          filters: undefined,
+          excludePaths: undefined,
+          includeExtensions: undefined,
+          excludeExtensions: undefined,
+          includeBaseFiles: false,
+          properties: undefined,
+          formulas: undefined,
+          summaries: undefined,
+          views: [{ type: "table", name: "Table", order: ["title", "author", "url"] }]
+        },
+        false,
+        false
+      ]
+    ]);
+    expect(mockCalls(runtime.db, "upsertNote")).toHaveLength(0);
+    expect(parsed.operation).toBe("create_base");
+    expect(parsed.path).toBe("Bases/Reading.base");
+    expect(parsed.status).toBe("success");
+    expect(parsed.completionGuidance?.nextAction).toContain("Answer the user now");
+  });
+
+  it("create_base_file accepts shorthand folder scope from MCP hosts", async () => {
+    const runtime = createRuntime();
+    await startMcpServer(runtime);
+
+    const tool = sdkMock.registeredTools.get("create_base_file");
+    if (!tool) {
+      throw new Error("create_base_file was not registered");
+    }
+    await tool.handler({
+      scope: { folder: "Articles/Science" }
+    });
+
+    expect(mockCalls(runtime.bridge, "createBaseFile")[0]?.[0]).toBeUndefined();
+    expect(mockCalls(runtime.bridge, "createBaseFile")[0]?.[1]).toEqual({
+      scope: { kind: "folder", folder: "Articles/Science" },
+      filters: undefined,
+      excludePaths: undefined,
+      includeExtensions: undefined,
+      excludeExtensions: undefined,
+      includeBaseFiles: false,
+      properties: undefined,
+      formulas: undefined,
+      summaries: undefined,
+      views: undefined
+    });
+  });
+
+  it("create_base_file passes structured base filters and sorting controls", async () => {
+    const runtime = createRuntime();
+    await startMcpServer(runtime);
+
+    const tool = sdkMock.registeredTools.get("create_base_file");
+    if (!tool) {
+      throw new Error("create_base_file was not registered");
+    }
+    await tool.handler({
+      scope: { folder: "Articles/Politics" },
+      filters: 'tags.contains("politics")',
+      excludePaths: ["Articles/Politics/Politics.base"],
+      includeExtensions: ["md"],
+      excludeExtensions: ["canvas"],
+      views: [
+        {
+          type: "table",
+          name: "All Politics Files",
+          order: ["file.name", "title", "author"],
+          sort: [{ property: "date", direction: "DESC" }]
+        }
+      ]
+    });
+
+    expect(mockCalls(runtime.bridge, "createBaseFile")[0]?.[1]).toEqual({
+      scope: { kind: "folder", folder: "Articles/Politics" },
+      filters: 'tags.contains("politics")',
+      excludePaths: ["Articles/Politics/Politics.base"],
+      includeExtensions: ["md"],
+      excludeExtensions: ["canvas"],
+      includeBaseFiles: false,
+      properties: undefined,
+      formulas: undefined,
+      summaries: undefined,
+      views: [
+        {
+          type: "table",
+          name: "All Politics Files",
+          order: ["file.name", "title", "author"],
+          sort: [{ property: "date", direction: "DESC" }]
+        }
+      ]
+    });
   });
 
   it("replace_note_text preserves occurrenceIndex and returns completion guidance", async () => {
@@ -253,6 +395,22 @@ function createRuntime(options: { embeddingsEnabled?: boolean; orphanedEmbedding
       ),
       readNote: vi.fn(() => Promise.resolve(note)),
       createNote: vi.fn(() => Promise.resolve({ operation: "create", note })),
+      createBaseFile: vi.fn((path: string | undefined, base: { scope?: { kind?: string; folder?: string } }) =>
+        Promise.resolve({
+          operation: "create_base",
+          path:
+            path && path.endsWith(".base")
+              ? path
+              : path
+                ? `${path}.base`
+                : base.scope?.kind === "folder" && base.scope.folder
+                  ? `${base.scope.folder}/${base.scope.folder.split("/").pop()}.base`
+                  : "Vault.base",
+          content: "views:\n  - type: table\n",
+          overwritten: false,
+          createdFolders: []
+        })
+      ),
       appendNote: vi.fn(() => Promise.resolve({ operation: "append", note })),
       replaceNoteText: vi.fn(() => Promise.resolve({ operation: "replace", note })),
       deleteNoteText: vi.fn(() => Promise.resolve({ operation: "delete_text", note })),

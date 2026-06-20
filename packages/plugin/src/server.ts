@@ -1,19 +1,26 @@
-import { FileSystemAdapter, TFile } from "obsidian";
+import { FileSystemAdapter, TFile, TFolder } from "obsidian";
 import {
+  buildBaseFileContent,
   clampLimit,
   clampOffset,
   appendNoteContent,
   deleteExactText,
+  isHiddenOrConfigPath,
   isPathIncluded,
   makeSnippet,
   NoteEditError,
+  normalizeBasePath,
   normalizeTag,
-  normalizeVaultScope,
   normalizeVaultPath,
+  normalizeVaultScope,
+  normalizeBaseScope,
   parseMarkdown,
   replaceExactText,
+  resolveBasePath,
   titleFromPath,
   truncateText,
+  type BaseFileInput,
+  type BaseFileWriteResponse,
   type BridgeExportResponse,
   type BridgeListResponse,
   type BridgeStatus,
@@ -136,6 +143,9 @@ async function handleRequest(
       return;
     case "/notes/properties":
       await routeSetNoteProperties(plugin, response, route, body);
+      return;
+    case "/bases/create":
+      await routeCreateBaseFile(plugin, response, route, body);
       return;
     default:
       await plugin.audit({ route, allowed: false, reason: "unknown_route" });
@@ -466,6 +476,90 @@ async function routeSetNoteProperties(
   }
 }
 
+async function routeCreateBaseFile(
+  plugin: ObsidianMcpPlugin,
+  response: ServerResponse,
+  route: string,
+  body: JsonRecord
+): Promise<void> {
+  const rawPath = stringField(body.path);
+  if (!(await ensureWritesEnabled(plugin, response, route, rawPath))) {
+    return;
+  }
+
+  let path: string;
+  let content: string;
+  try {
+    if (!body.scope) {
+      await plugin.audit({ route, path: rawPath, allowed: false, reason: "missing_base_scope" });
+      sendJson(response, 400, {
+        error:
+          "Base scope is required. Resolve the user's intended folder or files first, or pass { kind: \"vault\" } only when the user explicitly asks for the whole vault."
+      });
+      return;
+    }
+    const baseInput: BaseFileInput = {
+      scope: body.scope as BaseFileInput["scope"],
+      filters: baseFilterField(body.filters),
+      excludePaths: stringArrayField(body.excludePaths),
+      includeExtensions: stringArrayField(body.includeExtensions),
+      excludeExtensions: stringArrayField(body.excludeExtensions),
+      includeBaseFiles: booleanField(body.includeBaseFiles),
+      properties: jsonRecordField(body.properties) ?? undefined,
+      formulas: stringRecordField(body.formulas) ?? undefined,
+      summaries: jsonRecordField(body.summaries) ?? undefined,
+      views: Array.isArray(body.views) ? (body.views as BaseFileInput["views"]) : undefined
+    };
+    const createFolder = booleanField(body.createFolder);
+    const requestedScope = baseInput.scope;
+    baseInput.scope = resolveBaseInputScope(plugin, requestedScope, createFolder);
+    path = resolveBaseWritePath(rawPath, requestedScope, baseInput.scope);
+    if (!isBasePathAllowed(plugin, path)) {
+      await plugin.audit({ route, path, allowed: false, reason: "denied_or_invalid" });
+      sendJson(response, 404, { error: "Writable base file path is not allowed." });
+      return;
+    }
+    content = buildBaseFileContent(baseInput);
+  } catch (error) {
+    await plugin.audit({ route, path: rawPath, allowed: false, reason: "invalid_base" });
+    sendJson(response, 400, { error: formatWriteError(error) });
+    return;
+  }
+
+  if (!isContentWithinLimit(content, plugin.settings.maxNoteBytes)) {
+    await plugin.audit({ route, path, allowed: false, reason: "content_too_large" });
+    sendJson(response, 413, { error: `Content exceeds maximum note size of ${plugin.settings.maxNoteBytes} bytes.` });
+    return;
+  }
+
+  const existing = plugin.app.vault.getAbstractFileByPath(path);
+  const overwrite = booleanField(body.overwrite);
+  if (existing && !(existing instanceof TFile && existing.extension === "base" && overwrite)) {
+    await plugin.audit({ route, path, allowed: false, reason: "path_exists" });
+    sendJson(response, 409, { error: "A vault item already exists at this path." });
+    return;
+  }
+
+  try {
+    const createdFolders = await ensureParentFolders(plugin, path, booleanField(body.createFolder));
+    const file = existing instanceof TFile ? existing : await plugin.app.vault.create(path, content);
+    if (existing instanceof TFile) {
+      await plugin.app.vault.modify(file, content);
+    }
+    await plugin.audit({ route, path, allowed: true });
+    sendJson(response, 200, {
+      operation: "create_base",
+      path,
+      content,
+      overwritten: existing instanceof TFile,
+      createdFolders
+    } satisfies BaseFileWriteResponse);
+  } catch (error) {
+    await plugin.audit({ route, path, allowed: false, reason: "write_failed" });
+    sendJson(response, 400, { error: formatWriteError(error) });
+  }
+}
+
 async function routeMutateExistingNote(
   plugin: ObsidianMcpPlugin,
   response: ServerResponse,
@@ -686,6 +780,126 @@ function isAllowedPathOnly(plugin: ObsidianMcpPlugin, path: string): boolean {
   return isAllowedFile(plugin, abstract);
 }
 
+function isBasePathAllowed(plugin: ObsidianMcpPlugin, path: string): boolean {
+  const normalized = normalizeVaultPath(path);
+  if (isHiddenOrConfigPath(normalized)) {
+    return false;
+  }
+  const scope = normalizeVaultScope(plugin.settings);
+  if (scope.excludedFiles.some((file) => normalized === file)) {
+    return false;
+  }
+  return !scope.excludedFolders.some((folder) => normalized === folder || normalized.startsWith(`${folder}/`));
+}
+
+function resolveBaseInputScope(plugin: ObsidianMcpPlugin, scope: BaseFileInput["scope"], createFolder: boolean): BaseFileInput["scope"] {
+  const normalizedScope = normalizeBaseScope(scope);
+  if (normalizedScope.kind !== "folder") {
+    return normalizedScope;
+  }
+
+  const requested = normalizeVaultPath(normalizedScope.folder);
+  const detectedFolders = buildVaultScopePreview(plugin).detectedFolders;
+  if (detectedFolders.includes(requested)) {
+    return { kind: "folder", folder: requested };
+  }
+
+  const matches = detectedFolders.filter((folder) => folder.split("/").pop()?.toLowerCase() === requested.toLowerCase());
+  if (matches.length === 1) {
+    return { kind: "folder", folder: matches[0]! };
+  }
+
+  if (matches.length > 1) {
+    throw new Error(`Folder "${requested}" is ambiguous. Use one exact folder path: ${matches.join(", ")}.`);
+  }
+
+  if (createFolder) {
+    return { kind: "folder", folder: requested };
+  }
+
+  const containing = detectedFolders.filter((folder) => folder.toLowerCase().includes(requested.toLowerCase())).slice(0, 5);
+  const hint =
+    containing.length > 0
+      ? ` Did you mean one of these existing folders? ${containing.join(", ")}.`
+      : " Resolve the folder with vault_status detectedFolders or list_notes, or set createFolder true only for a new folder.";
+  throw new Error(`Folder "${requested}" was not found.${hint}`);
+}
+
+function resolveBaseWritePath(
+  rawPath: string,
+  requestedScope: BaseFileInput["scope"],
+  resolvedScope: BaseFileInput["scope"]
+): string {
+  const trimmed = rawPath.trim();
+  const resolved = normalizeBaseScope(resolvedScope);
+  if (resolved.kind !== "folder") {
+    return resolveBasePath(trimmed || undefined, resolved);
+  }
+
+  const defaultPath = resolveBasePath(undefined, resolved);
+  if (!trimmed) {
+    return defaultPath;
+  }
+
+  const requested = normalizeBaseScope(requestedScope);
+  if (requested.kind !== "folder") {
+    return resolveBasePath(trimmed, resolved);
+  }
+
+  const requestedFolder = normalizeVaultPath(requested.folder);
+  const resolvedFolder = normalizeVaultPath(resolved.folder);
+  const candidate = normalizeBasePath(trimmed);
+  if (candidateFolder(candidate) === resolvedFolder) {
+    return candidate;
+  }
+
+  const requestedName = requestedFolder.split("/").pop()?.toLowerCase();
+  const resolvedName = resolvedFolder.split("/").pop()?.toLowerCase();
+  const resolvedParent = candidateFolder(resolvedFolder);
+  const candidateName = candidateBasename(candidate).toLowerCase();
+  const candidateParent = candidateFolder(candidate);
+  const candidateParentName = candidateParent.split("/").pop()?.toLowerCase();
+  const candidateNameDerived = isNameDerivedFromFolder(candidateName, requestedName, resolvedName);
+  const candidateParentNameDerived = isNameDerivedFromFolder(candidateParentName ?? "", requestedName, resolvedName);
+  const looksDerivedFromUnresolvedFolder =
+    candidateParent === requestedFolder ||
+    (candidateParent === resolvedParent && candidateNameDerived) ||
+    (!candidateParent && candidateNameDerived) ||
+    (candidateParentNameDerived && candidateNameDerived);
+
+  return looksDerivedFromUnresolvedFolder ? defaultPath : candidate;
+}
+
+function candidateFolder(path: string): string {
+  const parts = normalizeVaultPath(path).split("/");
+  parts.pop();
+  return parts.join("/");
+}
+
+function candidateBasename(path: string): string {
+  const filename = normalizeVaultPath(path).split("/").pop() ?? path;
+  return filename.replace(/\.base$/i, "");
+}
+
+function isNameDerivedFromFolder(name: string, requestedName: string | undefined, resolvedName: string | undefined): boolean {
+  const normalizedName = normalizeLooseName(name);
+  const candidates = [requestedName, resolvedName].map((value) => normalizeLooseName(value ?? "")).filter(Boolean);
+  return candidates.some(
+    (candidate) =>
+      normalizedName === candidate ||
+      normalizedName.startsWith(`${candidate} `) ||
+      normalizedName.endsWith(` ${candidate}`) ||
+      normalizedName.includes(` ${candidate} `)
+  );
+}
+
+function normalizeLooseName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function isAuthorized(request: IncomingMessage, token: string): boolean {
   const header = request.headers.authorization ?? "";
   return header === `Bearer ${token}`;
@@ -731,6 +945,36 @@ function jsonRecordField(value: unknown): Record<string, JsonValue> | null {
     }
   }
   return record;
+}
+
+function stringRecordField(value: unknown): Record<string, string> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "string") {
+      record[key] = entry;
+    }
+  }
+  return record;
+}
+
+function stringArrayField(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function baseFilterField(value: unknown): BaseFileInput["filters"] {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value && typeof value === "object" && !Array.isArray(value) && isJsonValue(value)) {
+    return value as BaseFileInput["filters"];
+  }
+  return undefined;
 }
 
 function isJsonValue(value: unknown): value is JsonValue {
@@ -821,6 +1065,36 @@ function optionalOccurrenceIndex(value: unknown): number | undefined {
 
 function isContentWithinLimit(value: string, maxBytes: number): boolean {
   return new TextEncoder().encode(value).byteLength <= maxBytes;
+}
+
+async function ensureParentFolders(plugin: ObsidianMcpPlugin, path: string, createFolder: boolean): Promise<string[]> {
+  const folders = parentFolders(path);
+  const created: string[] = [];
+  for (const folder of folders) {
+    const existing = plugin.app.vault.getAbstractFileByPath(folder);
+    if (existing instanceof TFolder) {
+      continue;
+    }
+    if (existing) {
+      throw new Error(`A vault item already exists at parent folder path ${folder}.`);
+    }
+    if (!createFolder) {
+      throw new Error(`Parent folder ${folder} does not exist.`);
+    }
+    await plugin.app.vault.createFolder(folder);
+    created.push(folder);
+  }
+  return created;
+}
+
+function parentFolders(path: string): string[] {
+  const parts = normalizeVaultPath(path).split("/");
+  parts.pop();
+  const folders: string[] = [];
+  for (let index = 1; index <= parts.length; index += 1) {
+    folders.push(parts.slice(0, index).join("/"));
+  }
+  return folders;
 }
 
 function formatWriteError(error: unknown): string {

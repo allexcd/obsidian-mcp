@@ -21,5 +21,9 @@ export class TFile {
   stat = { ctime: 0, mtime: 0, size: 0 };
 }
 
+export class TFolder {
+  path = "";
+}
+
 export type App = unknown;
 export type ButtonComponent = unknown;

@@ -18,7 +18,7 @@ The token is stored in Obsidian SecretStorage when available. Older or incompati
 - Hidden folders, Obsidian config folders, trash folders, git folders, and traversal paths are always denied.
 - The bridge and MCP tools cap output and paginate broad results.
 - Full note reads require an exact path.
-- Write tools are disabled by default. When enabled, they can only create or edit non-excluded Markdown notes; file deletion and command execution are not exposed.
+- Write tools are disabled by default. When enabled, they can only create or edit non-excluded Markdown notes and Obsidian `.base` files; file deletion and command execution are not exposed.
 
 ## Embeddings
 

@@ -35,6 +35,31 @@ describe("BridgeClient write methods", () => {
     });
   });
 
+  it("sends base file creation requests to the base create route", async () => {
+    const client = new BridgeClient("http://127.0.0.1:27125", "token");
+
+    await client.createBaseFile(
+      "Bases/Reading",
+      {
+        scope: { kind: "folder", folder: "Reading" },
+        views: [{ type: "table", name: "Table", order: ["title", "author", "url"] }]
+      },
+      false,
+      true
+    );
+
+    expect(requestJsonMock).toHaveBeenCalledWith(new URL("http://127.0.0.1:27125/bases/create"), {
+      headers: { Authorization: "Bearer token" },
+      body: {
+        path: "Bases/Reading",
+        scope: { kind: "folder", folder: "Reading" },
+        views: [{ type: "table", name: "Table", order: ["title", "author", "url"] }],
+        overwrite: false,
+        createFolder: true
+      }
+    });
+  });
+
   it("sends exact replacement requests without losing occurrenceIndex", async () => {
     const client = new BridgeClient("http://127.0.0.1:27125", "token");
 
