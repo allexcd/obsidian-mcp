@@ -43,7 +43,7 @@
     "eslint-plugin-obsidianmd": "^0.2.9",
     "globals": "^17.6.0",
     "typescript": "^5.8.2",
-    "typescript-eslint": "^8.59.2"
+    "typescript-eslint": "^8.62.0"
   },
   "dependencies": {
     "vitest": "^4.1.9"
