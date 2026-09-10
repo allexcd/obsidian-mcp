@@ -67,6 +67,18 @@ describe("MCP write tools", () => {
     await expect(sdkMock.registeredTools.get(name)!.handler({query:"private", question:"private", path:"Private.md", limit:5})).rejects.toThrow("offline");
   });
 
+  it("create_folder forwards the path and retry ID without indexing or extra reads", async () => {
+    const runtime = createRuntime();
+    runtime.config.toolProfile = "compact";
+    runtime.bridge.createFolder = vi.fn(async () => ({ operation: "create_folder" as const, path: "Books", status: "created" as const }));
+    await startMcpServer(runtime);
+    const result = await sdkMock.registeredTools.get("create_folder")!.handler({ path: "Books", operationId: "folder-1" });
+    expect(mockCalls(runtime.bridge, "createFolder")).toEqual([["Books", "folder-1"]]);
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({ status: "created", path: "Books" });
+    expect(mockCalls(runtime.db, "upsertNote")).toHaveLength(0);
+    expect(mockCalls(runtime.bridge, "readNote")).toHaveLength(0);
+  });
+
   it("passes retry IDs and revisions through every note write tool", async () => {
     const runtime = createRuntime();
     await startMcpServer(runtime);
@@ -100,6 +112,7 @@ describe("MCP write tools", () => {
     const status = await runtime.bridge.status();
     runtime.bridge.status = vi.fn(async () => ({...status,writeToolsEnabled:false,readOnly:true}));
     await startMcpServer(runtime);
+    expect(sdkMock.registeredTools.has("create_folder")).toBe(false);
     expect(sdkMock.registeredTools.has("search_vault")).toBe(true);
     for (const name of ["refresh_index","prune_embeddings","analyze_vault","append_note","create_note"]) expect(sdkMock.registeredTools.has(name)).toBe(false);
   });

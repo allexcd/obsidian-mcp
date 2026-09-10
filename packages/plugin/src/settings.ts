@@ -331,7 +331,7 @@ export class ObsidianMcpSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Allow creating and editing notes")
-      .setDesc("Allow connected clients to create and edit included Markdown notes and bases. Disabled means read-only.")
+      .setDesc("Allow connected clients to create folders and create or edit included Markdown notes and bases. Disabled means read-only.")
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.writeToolsEnabled).onChange(async (value) => {
           this.plugin.settings.writeToolsEnabled = value;

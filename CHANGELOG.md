@@ -4,6 +4,8 @@ All notable changes to this project are documented here. Future entries are appe
 
 ## [Unreleased]
 
+- Add `create_folder` for empty folders, with exclusion checks, write permissions and safe repeated calls. Reload MCP clients to discover the tool.
+
 - Require explicit `rewrite_note` paths and revisions for `create_note(overwrite=true)` on existing notes. Reload MCP clients to pick up updated schemas.
 - Add optional operation IDs to all write tools for safe retries within a plugin session; reject conflicting ID reuse and recheck access before replay. Historical receipts cannot roll back the search index.
 

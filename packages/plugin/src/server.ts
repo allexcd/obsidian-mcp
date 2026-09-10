@@ -21,6 +21,7 @@ import {
   resolveBasePath,
   titleFromPath,
   truncateText,
+  type CreateFolderResponse,
   type BaseFileInput,
   type BaseFileWriteResponse,
   type BridgeExportResponse,
@@ -59,6 +60,7 @@ type WriteOperation = WriteNoteResponse["operation"];
 const writeRetries = new WeakMap<ObsidianMcpPlugin, WriteRetries>();
 const capturedReplies = new WeakMap<ServerResponse, (reply: WriteReply) => void>();
 const writeRoutes: Record<string, (plugin: ObsidianMcpPlugin, response: ServerResponse, route: string, body: JsonRecord) => Promise<void>> = {
+  "/folders/create": routeCreateFolder,
   "/notes/create": routeCreateNote, "/notes/append": routeAppendNote,
   "/notes/replace": routeReplaceNoteText, "/notes/delete-text": routeDeleteNoteText,
   "/notes/rewrite": routeRewriteNote, "/notes/properties": routeSetNoteProperties,
@@ -121,7 +123,7 @@ async function handleRequest(
       // Recheck both the current file and the historical response before replaying content.
       const saved = previous?.body as { path?: string; note?: VaultNote } | undefined;
       const path = saved?.note?.path ?? saved?.path ?? normalizeVaultPath(stringField(body.path));
-      if (route === "/bases/create") return isBasePathAllowed(plugin, path);
+      if (route === "/bases/create" || route === "/folders/create") return isWritableItemPathAllowed(plugin, path);
       const file = getAllowedFileByPath(plugin, path);
       return !!file && (!saved?.note || isContentAllowedAfterWrite(plugin, path, saved.note.content)) && isContentAllowedAfterWrite(plugin, path, await plugin.app.vault.read(file));
     }, async () => {
@@ -353,6 +355,56 @@ async function routeLinks(
   });
 }
 
+async function routeCreateFolder(
+  plugin: ObsidianMcpPlugin,
+  response: ServerResponse,
+  route: string,
+  body: JsonRecord
+): Promise<void> {
+  const rawPath = stringField(body.path);
+  if (!(await ensureWritesEnabled(plugin, response, route, rawPath))) return;
+  let path: string;
+  try {
+    if (/^[\\/]/.test(rawPath.trim())) throw new Error("Use a vault-relative path such as Books.");
+    path = normalizeVaultPath(rawPath);
+  } catch {
+    await plugin.audit({ route, path: rawPath, allowed: false, reason: "invalid_path" });
+    sendJson(response, 400, { code: "invalid_path", error: "Use a nonempty vault-relative folder path without traversal, such as Books or Books/Fiction." });
+    return;
+  }
+  if (!isWritableItemPathAllowed(plugin, path)) {
+    await plugin.audit({ route, path, allowed: false, reason: "scope_denied" });
+    sendJson(response, 403, { code: "scope_denied", error: "This folder path is excluded or reserved." });
+    return;
+  }
+  const existing = plugin.app.vault.getAbstractFileByPath(path);
+  if (existing && !(existing instanceof TFolder)) {
+    await plugin.audit({ route, path, allowed: false, reason: "path_exists" });
+    sendJson(response, 409, { code: "path_exists", error: "A file already occupies this folder path." });
+    return;
+  }
+  let created = false;
+  if (!existing) {
+    const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    if (parent && !(plugin.app.vault.getAbstractFileByPath(parent) instanceof TFolder)) {
+      await plugin.audit({ route, path, allowed: false, reason: "parent_missing" });
+      sendJson(response, 409, { code: "parent_missing", error: `Parent folder ${parent} is missing or occupied by a file. Create the parent folder first.` });
+      return;
+    }
+    try { await plugin.app.vault.createFolder(path); created = true; }
+    catch {
+      // An Obsidian user may create the same folder while this request is running.
+      if (!(plugin.app.vault.getAbstractFileByPath(path) instanceof TFolder)) {
+        await plugin.audit({ route, path, allowed: false, reason: "write_failed" });
+        sendJson(response, 400, { code: "write_failed", error: "Could not create the folder. Check its path and vault filesystem permissions." });
+        return;
+      }
+    }
+  }
+  await plugin.audit({ route, path, allowed: true });
+  sendJson(response, 200, { operation: "create_folder", path, status: created ? "created" : "already_exists" } satisfies CreateFolderResponse);
+}
+
 async function routeCreateNote(
   plugin: ObsidianMcpPlugin,
   response: ServerResponse,
@@ -543,7 +595,7 @@ async function routeCreateBaseFile(
     const requestedScope = baseInput.scope;
     baseInput.scope = resolveBaseInputScope(plugin, requestedScope, createFolder);
     path = resolveBaseWritePath(rawPath, requestedScope, baseInput.scope);
-    if (!isBasePathAllowed(plugin, path)) {
+    if (!isWritableItemPathAllowed(plugin, path)) {
       await plugin.audit({ route, path, allowed: false, reason: "denied_or_invalid" });
       sendJson(response, 404, { error: "Writable base file path is not allowed." });
       return;
@@ -815,11 +867,13 @@ function isAllowedPathOnly(plugin: ObsidianMcpPlugin, path: string): boolean {
   return isAllowedFile(plugin, abstract);
 }
 
-function isBasePathAllowed(plugin: ObsidianMcpPlugin, path: string): boolean {
+function isWritableItemPathAllowed(plugin: ObsidianMcpPlugin, path: string): boolean {
   const normalized = normalizeVaultPath(path);
   if (isHiddenOrConfigPath(normalized)) {
     return false;
   }
+  const configDir = normalizeVaultPath(plugin.app.vault.configDir);
+  if (normalized === configDir || normalized.startsWith(`${configDir}/`)) return false;
   const scope = normalizeVaultScope(plugin.settings);
   if (scope.excludedFiles.some((file) => normalized === file)) {
     return false;

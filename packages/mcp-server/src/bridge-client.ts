@@ -1,4 +1,5 @@
 import type {
+  CreateFolderResponse,
   BridgeSync,
   AdapterReport,
   BaseFileInput,
@@ -72,6 +73,10 @@ export class BridgeClient {
 
   async links(path: string): Promise<{ path: string; outlinks: string[]; embeds: string[]; backlinks: string[] }> {
     return this.request<{ path: string; outlinks: string[]; embeds: string[]; backlinks: string[] }>("/notes/links", { path });
+  }
+
+  async createFolder(path: string, operationId?: string): Promise<CreateFolderResponse> {
+    return this.request<CreateFolderResponse>("/folders/create", { path, operationId });
   }
 
   async createNote(path: string, content: string, overwrite: boolean, expectedRevision?: string, operationId?: string): Promise<WriteNoteResponse> {

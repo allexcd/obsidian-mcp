@@ -20,6 +20,14 @@ describe("BridgeClient write methods", () => {
     });
   });
 
+  it("sends folder creation with its retry ID", async () => {
+    const client = new BridgeClient("http://127.0.0.1:27125", "token");
+    await client.createFolder("Books", "folder-1");
+    expect(requestJsonMock).toHaveBeenCalledWith(new URL("http://127.0.0.1:27125/folders/create"), {
+      headers: { Authorization: "Bearer token" }, body: { path: "Books", operationId: "folder-1" }
+    });
+  });
+
   it("preserves operation IDs and revisions in bridge requests", async () => {
     const client = new BridgeClient("http://127.0.0.1:27125", "token");
     await client.appendNote("Notes/A.md", "addition", "revision", "append-1");

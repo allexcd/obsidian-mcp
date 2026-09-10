@@ -18,6 +18,55 @@ describe("plugin bridge write routes", () => {
     vi.restoreAllMocks();
   });
 
+  it("creates empty folders and handles repeated, nested and concurrent calls without notes", async () => {
+    const port = await getFreePort();
+    const { plugin, vault, folders } = createPlugin({ port });
+    handles.push(await createBridgeServer(plugin, "token"));
+    const replies = await Promise.all([postJson(port, "/folders/create", { path: "Books" }), postJson(port, "/folders/create", { path: "Books" })]);
+    expect(replies.map(reply => reply.body)).toEqual([
+      { operation: "create_folder", path: "Books", status: "created" },
+      { operation: "create_folder", path: "Books", status: "already_exists" }
+    ]);
+    expect(vault.createFolder).toHaveBeenCalledTimes(1);
+    expect(vault.create).not.toHaveBeenCalled();
+    expect(folders.has("Books")).toBe(true);
+    const body = { path: "Books/Fiction", operationId: "folder-1" };
+    expect((await postJson(port, "/folders/create", body)).body).toMatchObject({ status: "created" });
+    expect((await postJson(port, "/folders/create", body)).body).toMatchObject({ replayed: true });
+    expect(vault.createFolder).toHaveBeenCalledTimes(2);
+    plugin.settings.excludedFolders = ["Books"];
+    expect((await postJson(port, "/folders/create", body)).status).toBe(403);
+  });
+
+  it.each(["", "/Books", "../Books", "Books/../Other", "C:\\Books", [".", "obsidian/Books"].join(""), ".git", "Private", "Private/Books"])("rejects invalid or excluded folder path %s", async path => {
+    const port = await getFreePort();
+    const { plugin, vault } = createPlugin({ port, excludedFolders: ["Private"] });
+    handles.push(await createBridgeServer(plugin, "token"));
+    expect((await postJson(port, "/folders/create", { path })).status).toBeGreaterThanOrEqual(400);
+    expect(vault.createFolder).not.toHaveBeenCalled();
+  });
+
+  it("denies a custom configuration directory", async () => {
+    const port = await getFreePort();
+    const { plugin, vault } = createPlugin({ port });
+    Object.defineProperty(plugin.app.vault, "configDir", { value: "Configuration" });
+    handles.push(await createBridgeServer(plugin, "token"));
+    expect((await postJson(port, "/folders/create", { path: "Configuration" })).status).toBe(403);
+    expect((await postJson(port, "/folders/create", { path: "Configuration/Books" })).status).toBe(403);
+    expect(vault.createFolder).not.toHaveBeenCalled();
+  });
+
+  it("rejects disabled writes, missing parents and file collisions", async () => {
+    const port = await getFreePort();
+    const { plugin, vault } = createPlugin({ port, writeToolsEnabled: false, files: [{ path: "Books", content: "existing file" }] });
+    handles.push(await createBridgeServer(plugin, "token"));
+    expect((await postJson(port, "/folders/create", { path: "New" })).status).toBe(403);
+    plugin.settings.writeToolsEnabled = true;
+    expect((await postJson(port, "/folders/create", { path: "New/Child" })).body).toMatchObject({ code: "parent_missing" });
+    expect((await postJson(port, "/folders/create", { path: "Books" })).body).toMatchObject({ code: "path_exists" });
+    expect(vault.createFolder).not.toHaveBeenCalled();
+  });
+
   it("replays a concurrent append once and blocks mismatched IDs and newly excluded receipts", async () => {
     const port = await getFreePort();
     const { plugin, file } = createPlugin({ port, files: [{ path: "Test.md", content: "original" }] });

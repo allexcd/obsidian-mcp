@@ -148,3 +148,10 @@ export interface PruneEmbeddingsResult {
   deletedEmbeddings: number;
   estimatedBytesFreed: number;
 }
+
+export interface CreateFolderResponse {
+  operation: "create_folder";
+  path: string;
+  status: "created" | "already_exists";
+  replayed?: boolean;
+}

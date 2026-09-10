@@ -60,6 +60,7 @@ If your server applies task prefixes itself, disable automatic prefixes with exp
 | `get_note_metadata` | Live Obsidian Properties and link metadata. |
 | `get_note_links` | Live outlinks, embeds, and backlinks. |
 | `related_notes` | Indexed link and tag relationships, checked against current access. |
+| `create_folder` | Create an empty folder at an exact vault-relative path; parent must exist. Repeated calls return `already_exists`. |
 | `create_note` | Create Markdown; existing-note overwrite requires `expectedRevision`. |
 | `append_note` | Append to an existing note. |
 | `replace_note_text` | Replace an exact body-text match; ambiguous matches need a zero-based occurrence index. |
@@ -77,7 +78,7 @@ Retrieval returns paths, available headings/line locations, revisions, and trunc
 `read_note` and successful writes return a SHA-256 `revision` of the full note. Pass it as `expectedRevision` on existing-note edits. A stale revision produces `revision_conflict` / HTTP 409 without writing. Older callers may omit it, but then cannot protect against changes since their earlier read. Edits still run against current content atomically. Full-note overwrites through `create_note(overwrite=true)` now require `expectedRevision` and use the same atomic conflict check; prefer `rewrite_note` for existing notes. `rewrite_note` requires an explicit, nonblank path and never falls back to the last-read note.
 
 
-All seven write tools accept optional `operationId` (1–128 characters). Supply a unique ID for each intended write; retry with the same ID and identical arguments. The plugin serializes writes across adapters and returns the original receipt with `replayed: true` for a recognized retry, without repeating the edit. Reusing an ID for different arguments returns `operation_id_conflict`. A replay is a historical receipt: its content may no longer be current and is not reindexed. Read again before a new edit.
+All eight write tools accept optional `operationId` (1–128 characters). Supply a unique ID for each intended write; retry with the same ID and identical arguments. The plugin serializes writes across adapters and returns the original receipt with `replayed: true` for a recognized retry, without repeating the edit. Reusing an ID for different arguments returns `operation_id_conflict`. A replay is a historical receipt: its content may no longer be current and is not reindexed. Read again before a new edit.
 
 Receipts are shared by clients for the current plugin session and survive bridge restarts, but **not plugin reloads or Obsidian restarts**. Requests without an ID retain legacy behavior and have no retry protection. After a plugin restart or an uncertain result, read the file before deciding whether another edit is needed. The adapter does not automatically retry writes. Access and write permissions are checked before replay; changed exclusion rules invalidate old receipts.
 
@@ -90,3 +91,5 @@ The authenticated bridge exposes `/sync` with a session epoch, monotonic change 
 `/authorize` validates candidate paths against current content and scope before cached results leave the adapter. `/adapter/report` supplies recent activity and progress to Settings. `/search/config` supplies embedding defaults and credentials to the authenticated local adapter; status responses omit credentials.
 
 SQLite transactions protect note/chunk/FTS mutations. Expiring, heartbeated database leases serialize reconciliation and embedding batches across adapters. Vector inserts ignore chunks deleted while the request was running. Notes and settings are never migrated destructively; derived index structures are created as needed and text is reconciled on connection.
+
+`create_folder({ "path": "Books" })` creates a root-level empty folder, with no placeholder note. Writes must be enabled. Hidden/config paths, traversal, absolute paths, exclusions and file collisions are rejected. For `Books/Fiction`, create `Books` first if missing. No note indexing or embedding is needed. Reload MCP clients after upgrading to discover the new tool.
