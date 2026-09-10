@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SearchResult, WriteNoteResponse } from "@obsidian-mcp/shared";
 import type { IndexedNote, IndexStats } from "./database.js";
 import type { McpRuntime } from "./mcp.js";
-import { indexWrittenNote, retrieveVaultQuestion } from "./mcp.js";
+import { indexWrittenNote, retrieveVaultQuestion, mergeResults } from "./mcp.js";
 
 const indexStats: IndexStats = {
   noteCount: 2,
@@ -31,6 +31,22 @@ const semanticResult: SearchResult = {
 };
 
 describe("retrieveVaultQuestion", () => {
+  it("fuses ranks instead of comparing incompatible raw scores", () => {
+    const result=mergeResults([{path:"A",score:1000},{path:"B",score:500}],[{path:"B",score:0.9},{path:"C",score:0.8}],3);
+    expect(result.map(row=>row.path)).toEqual(["B","A","C"]);
+  });
+  it("falls back even when semantic mode was explicitly requested", async () => {
+    const runtime=createRuntime({embeddingsEnabled:true,stats:indexStats,embed:async()=>{throw new Error("offline");},searchFts:()=>[lexicalResult]});
+    const result=await retrieveVaultQuestion(runtime,"words",5,"semantic");
+    expect(result.requestedMode).toBe("semantic");expect(result.retrievalMode).toBe("lexical");
+    expect(result.fallbackReason).toContain("offline");expect(result.results[0]?.path).toBe(lexicalResult.path);
+  });
+  it("paginates after fusion without repeating semantic candidates", async () => {
+    const runtime=createRuntime({embeddingsEnabled:true,stats:indexStats,embed:async()=>[[1,0]],searchFts:()=>[lexicalResult],semanticSearch:()=>[semanticResult]});
+    const first=await retrieveVaultQuestion(runtime,"words",1,"hybrid",0);
+    const second=await retrieveVaultQuestion(runtime,"words",1,"hybrid",1);
+    expect(first.results[0]?.path).not.toBe(second.results[0]?.path);
+  });
   it("uses hybrid semantic retrieval when embeddings and vectors are available", async () => {
     const embed = vi.fn(() => Promise.resolve([[1, 0, 0]]));
     const semanticSearch = vi.fn(() => [semanticResult]);
@@ -52,7 +68,7 @@ describe("retrieveVaultQuestion", () => {
       semanticAvailable: true,
       embeddingCount: 4
     });
-    expect(result.results[0]?.path).toBe("Notes/Semantic.md");
+    expect(result.results.map(item => item.path)).toEqual(["Notes/Lexical.md", "Notes/Semantic.md"]);
   });
 
   it("does not call embeddings when enabled but no vectors are stored yet", async () => {
@@ -69,10 +85,10 @@ describe("retrieveVaultQuestion", () => {
     expect(embed).not.toHaveBeenCalled();
     expect(result.retrievalMode).toBe("lexical");
     expect(result.semanticAvailable).toBe(false);
-    expect(result.hint).toContain("refresh_index");
+    expect(result.fallbackReason).toContain("No vectors");
   });
 
-  it("falls back to indexed note metadata when embeddings and full-text matches are unavailable", async () => {
+  it("returns no matches instead of unrelated metadata", async () => {
     const runtime = createRuntime({
       embeddingsEnabled: false,
       stats: indexStats,
@@ -97,8 +113,9 @@ describe("retrieveVaultQuestion", () => {
 
     const result = await retrieveVaultQuestion(runtime, "common themes", 5);
 
-    expect(result.retrievalMode).toBe("metadata");
-    expect(result.results[0]?.path).toBe("Notes/Overview.md");
+    expect(result.retrievalMode).toBe("lexical");
+    expect(result.results).toEqual([]);
+    expect(result.hint).toContain("No matching notes");
   });
 });
 
@@ -185,6 +202,8 @@ function createRuntime(options: {
     },
     bridge: {} as McpRuntime["bridge"],
     db: {
+      getNote: () => null,
+      relatedNotes: () => [],
       stats: () => options.stats,
       searchFts: options.searchFts ?? (() => []),
       semanticSearch: options.semanticSearch ?? (() => []),

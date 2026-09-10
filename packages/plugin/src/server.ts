@@ -1,4 +1,6 @@
-import { FileSystemAdapter, TFile, TFolder } from "obsidian";
+import { WriteRetries, type WriteReply } from "./write-retries.js";
+import { BridgeSyncState, contentRevision } from "./sync.js";
+import { FileSystemAdapter, TFile, TFolder, parseYaml, stringifyYaml } from "obsidian";
 import {
   buildBaseFileContent,
   clampLimit,
@@ -54,6 +56,15 @@ interface BridgeCache {
 
 type WriteOperation = WriteNoteResponse["operation"];
 
+const writeRetries = new WeakMap<ObsidianMcpPlugin, WriteRetries>();
+const capturedReplies = new WeakMap<ServerResponse, (reply: WriteReply) => void>();
+const writeRoutes: Record<string, (plugin: ObsidianMcpPlugin, response: ServerResponse, route: string, body: JsonRecord) => Promise<void>> = {
+  "/notes/create": routeCreateNote, "/notes/append": routeAppendNote,
+  "/notes/replace": routeReplaceNoteText, "/notes/delete-text": routeDeleteNoteText,
+  "/notes/rewrite": routeRewriteNote, "/notes/properties": routeSetNoteProperties,
+  "/bases/create": routeCreateBaseFile
+};
+
 export async function createBridgeServer(plugin: ObsidianMcpPlugin, token: string): Promise<BridgeServerHandle> {
   const http = loadNodeHttp();
   const server = http.createServer((request, response) => {
@@ -100,7 +111,64 @@ async function handleRequest(
   const body = request.method === "POST" ? await readJsonBody(request, plugin.settings.maxNoteBytes + 16_384) : {};
   const route = url.pathname.replace(/\/+$/, "") || "/";
 
+  plugin.syncState ??= new BridgeSyncState();
+  const write = writeRoutes[route];
+  if (write) {
+    let retries = writeRetries.get(plugin);
+    if (!retries) { retries = new WriteRetries(); writeRetries.set(plugin, retries); }
+    const reply = await retries.run(body.operationId, { route, body }, async previous => {
+      if (!plugin.settings.writeToolsEnabled) return false;
+      // Recheck both the current file and the historical response before replaying content.
+      const saved = previous?.body as { path?: string; note?: VaultNote } | undefined;
+      const path = saved?.note?.path ?? saved?.path ?? normalizeVaultPath(stringField(body.path));
+      if (route === "/bases/create") return isBasePathAllowed(plugin, path);
+      const file = getAllowedFileByPath(plugin, path);
+      return !!file && (!saved?.note || isContentAllowedAfterWrite(plugin, path, saved.note.content)) && isContentAllowedAfterWrite(plugin, path, await plugin.app.vault.read(file));
+    }, async () => {
+      let result: WriteReply | undefined;
+      capturedReplies.set(response, value => { result = value; });
+      try { await write(plugin, response, route, body); }
+      finally { capturedReplies.delete(response); }
+      return result ?? { status: 500, body: { code: "write_result_unknown", error: "Read the file to verify the outcome before making another edit." } };
+    }, contentRevision(JSON.stringify(normalizeVaultScope(plugin.settings))));
+    sendJson(response, reply.status, reply.body);
+    return;
+  }
   switch (route) {
+    case "/sync": {
+      const allowedPaths = getAllowedMarkdownFiles(plugin).map(file => file.path);
+      sendJson(response, 200, {
+        epoch: plugin.syncState.epoch, revision: plugin.syncState.revision,
+        policyRevision: contentRevision(JSON.stringify(normalizeVaultScope(plugin.settings))),
+        ...plugin.syncState.changes(body.epoch, body.revision), allowedPaths,
+        refreshRequest: plugin.syncState.refreshRequest
+      });
+      return;
+    }
+    case "/authorize": {
+      const paths = Array.isArray(body.paths) ? body.paths.filter((path): path is string => typeof path === "string").slice(0, 10000) : [];
+      const allowed: string[] = [];
+      for (const path of paths) {
+        const file = getAllowedFileByPath(plugin, path);
+        if (file && isContentAllowedAfterWrite(plugin, path, await plugin.app.vault.read(file))) allowed.push(path);
+      }
+      sendJson(response, 200, { paths: allowed });
+      return;
+    }
+    case "/adapter/report":
+      plugin.syncState.report = {
+        at: new Date().toISOString(), indexing: body.indexing === true,
+        lastError: typeof body.lastError === "string" ? body.lastError.slice(0, 500) : null,
+        lastSyncedAt: typeof body.lastSyncedAt === "string" ? body.lastSyncedAt : null,
+        pending: typeof body.pending === "number" ? body.pending : 0,
+        searchState: typeof body.searchState === "string" ? body.searchState.slice(0, 100) : undefined,
+        embeddingError: typeof body.embeddingError === "string" ? body.embeddingError.slice(0, 500) : null
+      };
+      sendJson(response, 200, { ok: true });
+      return;
+    case "/search/config":
+      sendJson(response, 200, { ...buildStatus(plugin).search, apiKey: await plugin.getEmbeddingKey() });
+      return;
     case "/status":
       sendJson(response, 200, buildStatus(plugin));
       await plugin.audit({ route, allowed: true });
@@ -126,27 +194,6 @@ async function handleRequest(
     case "/notes/links":
       await routeLinks(plugin, response, route, body);
       return;
-    case "/notes/create":
-      await routeCreateNote(plugin, response, route, body);
-      return;
-    case "/notes/append":
-      await routeAppendNote(plugin, response, route, body);
-      return;
-    case "/notes/replace":
-      await routeReplaceNoteText(plugin, response, route, body);
-      return;
-    case "/notes/delete-text":
-      await routeDeleteNoteText(plugin, response, route, body);
-      return;
-    case "/notes/rewrite":
-      await routeRewriteNote(plugin, response, route, body);
-      return;
-    case "/notes/properties":
-      await routeSetNoteProperties(plugin, response, route, body);
-      return;
-    case "/bases/create":
-      await routeCreateBaseFile(plugin, response, route, body);
-      return;
     default:
       await plugin.audit({ route, allowed: false, reason: "unknown_route" });
       sendJson(response, 404, { error: "Unknown bridge route." });
@@ -158,6 +205,10 @@ function buildStatus(plugin: ObsidianMcpPlugin): BridgeStatus {
   const pluginDirectory = getPluginDirectory(plugin);
   return {
     ok: true,
+    policyRevision: contentRevision(JSON.stringify(normalizeVaultScope(plugin.settings))),
+    search: { enabled: plugin.settings.semanticEnabled, baseUrl: plugin.settings.embeddingBaseUrl, model: plugin.settings.embeddingModel },
+    toolProfile: plugin.settings.toolProfile,
+    adapterReport: plugin.syncState?.report ?? null,
     vaultName: plugin.app.vault.getName(),
     pluginVersion: plugin.manifest.version,
     bridgeVersion: plugin.manifest.version,
@@ -276,7 +327,7 @@ async function routeMetadata(
     return;
   }
   await plugin.audit({ route, path: file.path, allowed: true });
-  sendJson(response, 200, buildMetadata(plugin, file));
+  sendJson(response, 200, (await buildVaultNote(plugin, file)).metadata);
 }
 
 async function routeLinks(
@@ -292,7 +343,7 @@ async function routeLinks(
     sendJson(response, 404, { error: "Allowed note not found." });
     return;
   }
-  const metadata = buildMetadata(plugin, file);
+  const metadata = (await buildVaultNote(plugin, file)).metadata;
   await plugin.audit({ route, path: file.path, allowed: true });
   sendJson(response, 200, {
     path: file.path,
@@ -340,11 +391,16 @@ async function routeCreateNote(
     return;
   }
 
-  try {
-    const file = existing instanceof TFile ? existing : await plugin.app.vault.create(path, content);
-    if (existing instanceof TFile) {
-      await plugin.app.vault.modify(file, content);
+  if (existing instanceof TFile) {
+    if (typeof body.expectedRevision !== "string" || !body.expectedRevision) {
+      sendJson(response, 409, { code: "revision_required", error: "Overwriting an existing note requires expectedRevision from read_note. Prefer rewrite_note for replacement." });
+      return;
     }
+    await routeMutateExistingNote(plugin, response, route, body, "create", () => content);
+    return;
+  }
+  try {
+    const file = await plugin.app.vault.create(path, content);
     await sendWriteResponse(plugin, response, route, "create", file, content);
   } catch (error) {
     await plugin.audit({ route, path, allowed: false, reason: "write_failed" });
@@ -435,45 +491,18 @@ async function routeSetNoteProperties(
     return;
   }
 
-  try {
-    const previous = await plugin.app.vault.cachedRead(file);
-    await plugin.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, JsonValue>) => {
-      for (const [key, value] of Object.entries(properties)) {
-        if (value === undefined) {
-          continue;
-        }
-        frontmatter[key] = value;
-      }
-    });
-    const content = await plugin.app.vault.cachedRead(file);
-    if (!isContentAllowedAfterWrite(plugin, file.path, content)) {
-      await plugin.app.vault.modify(file, previous);
-      await plugin.audit({ route, path: file.path, allowed: false, reason: "post_write_scope_denied" });
-      sendJson(response, 403, { error: "Written note properties would be excluded by the current vault scope." });
-      return;
+  await routeMutateExistingNote(plugin, response, route, body, "properties", existing => {
+    const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(existing);
+    let frontmatter: Record<string, unknown> = {};
+    if (match) {
+      try {
+        const parsed: unknown = parseYaml(match[1] ?? "");
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) frontmatter = parsed as Record<string, unknown>;
+      } catch { /* Repair malformed frontmatter with the supplied properties. */ }
     }
-    await sendWriteResponse(plugin, response, route, "properties", file, content);
-  } catch (error) {
-    if (!isYamlParseError(error)) {
-      await plugin.audit({ route, path: file.path, allowed: false, reason: "write_failed" });
-      sendJson(response, 500, { error: formatWriteError(error) });
-      return;
-    }
-    const existing = await plugin.app.vault.cachedRead(file);
-    const next = replaceFrontmatterBlock(existing, properties);
-    if (!isContentWithinLimit(next, plugin.settings.maxNoteBytes)) {
-      await plugin.audit({ route, path: file.path, allowed: false, reason: "content_too_large" });
-      sendJson(response, 413, { error: `Content exceeds maximum note size of ${plugin.settings.maxNoteBytes} bytes.` });
-      return;
-    }
-    if (!isContentAllowedAfterWrite(plugin, file.path, next)) {
-      await plugin.audit({ route, path: file.path, allowed: false, reason: "post_write_scope_denied" });
-      sendJson(response, 403, { error: "Written note properties would be excluded by the current vault scope." });
-      return;
-    }
-    await plugin.app.vault.modify(file, next);
-    await sendWriteResponse(plugin, response, route, "properties", file, next);
-  }
+    const yaml = stringifyYaml({ ...frontmatter, ...properties }).trimEnd();
+    return `---\n${yaml}\n---\n${match ? existing.slice(match[0].length) : existing}`;
+  });
 }
 
 async function routeCreateBaseFile(
@@ -565,7 +594,7 @@ async function routeMutateExistingNote(
   response: ServerResponse,
   route: string,
   body: JsonRecord,
-  operation: Exclude<WriteOperation, "create">,
+  operation: WriteOperation,
   edit: (existing: string) => string
 ): Promise<void> {
   const rawPath = stringField(body.path);
@@ -583,23 +612,26 @@ async function routeMutateExistingNote(
   }
 
   try {
-    const existing = await plugin.app.vault.cachedRead(file);
-    const next = edit(existing);
-    if (!isContentWithinLimit(next, plugin.settings.maxNoteBytes)) {
-      await plugin.audit({ route, path: file.path, allowed: false, reason: "content_too_large" });
-      sendJson(response, 413, { error: `Content exceeds maximum note size of ${plugin.settings.maxNoteBytes} bytes.` });
-      return;
-    }
-    if (!isContentAllowedAfterWrite(plugin, file.path, next)) {
-      await plugin.audit({ route, path: file.path, allowed: false, reason: "post_write_scope_denied" });
-      sendJson(response, 403, { error: "Written note content would be excluded by the current vault scope." });
-      return;
-    }
-    await plugin.app.vault.modify(file, next);
+    const next = await plugin.app.vault.process(file, existing => {
+      if (body.expectedRevision !== undefined && body.expectedRevision !== contentRevision(existing)) {
+        throw new NoteEditError("The note changed since it was read. Read it again before editing.", "revision_conflict");
+      }
+      if (!getAllowedFileByPath(plugin, file.path) || !isContentAllowedAfterWrite(plugin, file.path, existing)) {
+        throw new NoteEditError("The note is no longer within the allowed scope.", "scope_denied");
+      }
+      const updated = edit(existing);
+      if (!isContentWithinLimit(updated, plugin.settings.maxNoteBytes)) {
+        throw new NoteEditError(`Content exceeds maximum note size of ${plugin.settings.maxNoteBytes} bytes.`, "content_too_large");
+      }
+      if (!isContentAllowedAfterWrite(plugin, file.path, updated)) {
+        throw new NoteEditError("Written note content would be excluded by the current vault scope.", "scope_denied");
+      }
+      return updated;
+    });
     await sendWriteResponse(plugin, response, route, operation, file, next);
   } catch (error) {
     await plugin.audit({ route, path: file.path, allowed: false, reason: error instanceof NoteEditError ? error.code : "write_failed" });
-    sendJson(response, error instanceof NoteEditError ? 400 : 500, { error: formatWriteError(error) });
+    sendJson(response, error instanceof NoteEditError ? (error.code === "revision_conflict" ? 409 : error.code === "scope_denied" ? 403 : error.code === "content_too_large" ? 413 : 400) : 500, { error: formatWriteError(error), code: error instanceof NoteEditError ? error.code : "write_failed" });
   }
 }
 
@@ -611,6 +643,7 @@ async function sendWriteResponse(
   file: TFile,
   content: string
 ): Promise<void> {
+  plugin.syncState?.changed(file.path);
   const note = buildVaultNoteFromContent(plugin, file, content, plugin.settings.maxNoteBytes);
   await plugin.audit({ route, path: file.path, allowed: true });
   sendJson(response, 200, { operation, note } satisfies WriteNoteResponse);
@@ -692,7 +725,8 @@ function buildSummary(plugin: ObsidianMcpPlugin, file: TFile): VaultNoteSummary 
 }
 
 async function buildVaultNote(plugin: ObsidianMcpPlugin, file: TFile, maxBytes = plugin.settings.maxNoteBytes): Promise<VaultNote> {
-  const content = await plugin.app.vault.cachedRead(file);
+  const content = await plugin.app.vault.read(file);
+  if (!isContentAllowedAfterWrite(plugin, file.path, content)) throw new Error("Note is no longer allowed by the current vault scope.");
   return buildVaultNoteFromContent(plugin, file, content, maxBytes);
 }
 
@@ -707,6 +741,7 @@ function buildVaultNoteFromContent(plugin: ObsidianMcpPlugin, file: TFile, conte
     tags: metadata.tags,
     aliases: metadata.aliases,
     frontmatter: metadata.frontmatter,
+    revision: contentRevision(content),
     content: truncated.text,
     truncated: truncated.truncated,
     metadata
@@ -923,6 +958,8 @@ async function readJsonBody(request: IncomingMessage, maxBytes: number): Promise
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
+  const capture = capturedReplies.get(response);
+  if (capture) { capture({ status, body }); return; }
   response.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store"
@@ -997,56 +1034,6 @@ function propertiesIntroduceExcludedTags(plugin: ObsidianMcpPlugin, properties: 
   }
   const tags = [...stringList(properties.tags), ...stringList(properties.tag)].map((tag) => normalizeTag(tag)).filter(Boolean);
   return tags.some((tag) => excluded.has(tag));
-}
-
-function isYamlParseError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /yaml|nested mappings|bad indentation|can not read|unexpected/i.test(message);
-}
-
-function replaceFrontmatterBlock(content: string, properties: Record<string, JsonValue>): string {
-  const body = stripExistingFrontmatterBlock(content);
-  return `---\n${serializeFrontmatter(properties)}\n---\n${body.replace(/^\r?\n/, "")}`;
-}
-
-function stripExistingFrontmatterBlock(content: string): string {
-  if (!content.startsWith("---\n") && !content.startsWith("---\r\n")) {
-    return content;
-  }
-  const match = /\r?\n---\r?\n/.exec(content.slice(3));
-  if (!match) {
-    return content;
-  }
-  return content.slice(3 + match.index + match[0].length);
-}
-
-function serializeFrontmatter(properties: Record<string, JsonValue>): string {
-  return Object.entries(properties)
-    .map(([key, value]) => `${key}: ${serializeYamlValue(value)}`.trimEnd())
-    .join("\n");
-}
-
-function serializeYamlValue(value: JsonValue): string {
-  if (value === null) {
-    return "";
-  }
-  if (Array.isArray(value)) {
-    return value.length === 0 ? "[]" : `[${value.map((item) => serializeYamlScalar(item)).join(", ")}]`;
-  }
-  if (typeof value === "object") {
-    return JSON.stringify(value);
-  }
-  return serializeYamlScalar(value);
-}
-
-function serializeYamlScalar(value: JsonValue): string {
-  if (typeof value === "string") {
-    return JSON.stringify(value);
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  return "";
 }
 
 function booleanField(value: unknown): boolean {

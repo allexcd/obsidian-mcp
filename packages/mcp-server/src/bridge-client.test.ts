@@ -20,6 +20,14 @@ describe("BridgeClient write methods", () => {
     });
   });
 
+  it("preserves operation IDs and revisions in bridge requests", async () => {
+    const client = new BridgeClient("http://127.0.0.1:27125", "token");
+    await client.appendNote("Notes/A.md", "addition", "revision", "append-1");
+    expect(requestJsonMock.mock.calls[0]?.[1]?.body).toMatchObject({ expectedRevision: "revision", operationId: "append-1" });
+    await client.createNote("Notes/A.md", "replacement", true, "revision", "overwrite-1");
+    expect(requestJsonMock.mock.calls[1]?.[1]?.body).toMatchObject({ expectedRevision: "revision", operationId: "overwrite-1" });
+  });
+
   it("sends create requests to the write create route", async () => {
     const client = new BridgeClient("http://127.0.0.1:27125", "token");
 

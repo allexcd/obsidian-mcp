@@ -9,7 +9,7 @@ const serverBundlePath = resolve("../../build/.tmp/mcp-server.cjs");
 const context = await esbuild.context({
   entryPoints: ["src/main.ts"],
   bundle: true,
-  external: ["obsidian"],
+  external: ["obsidian", "node:crypto"],
   format: "cjs",
   target: "es2020",
   logLevel: "info",

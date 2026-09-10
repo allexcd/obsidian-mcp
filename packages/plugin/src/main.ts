@@ -1,3 +1,4 @@
+import { BridgeSyncState } from "./sync.js";
 import { Notice, Platform, Plugin } from "obsidian";
 import type { BridgeAuditEntry } from "@obsidian-mcp/shared";
 import { createBridgeServer, type BridgeServerHandle } from "./server.js";
@@ -17,9 +18,13 @@ interface PersistedPluginData extends Partial<ObsidianMcpSettings> {
   auditLog?: BridgeAuditEntry[];
   fallbackToken?: string;
   installId?: string;
+  embeddingKeyFallback?: string;
 }
 
 export default class ObsidianMcpPlugin extends Plugin {
+  syncState = new BridgeSyncState();
+  private embeddingKeyFallback = "";
+  private knownLinks = new Map<string, string[]>();
   settings: ObsidianMcpSettings = { ...DEFAULT_SETTINGS };
   bridge: BridgeServerHandle | null = null;
   auditLog: BridgeAuditEntry[] = [];
@@ -58,6 +63,15 @@ export default class ObsidianMcpPlugin extends Plugin {
       return;
     }
 
+    this.registerEvent(this.app.vault.on("create", file => this.recordChange(file.path)));
+    this.registerEvent(this.app.vault.on("modify", file => this.recordChange(file.path)));
+    this.registerEvent(this.app.vault.on("delete", file => this.recordChange(file.path)));
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      this.syncState.changed(oldPath);
+      this.syncState.changed(file.path);
+    }));
+    this.registerEvent(this.app.metadataCache.on("changed", file => this.recordChange(file.path)));
+
     this.app.workspace.onLayoutReady(() => {
       ensureInstalledRuntimeFiles(this).catch((error: unknown) => {
         console.error("Unable to materialize MCP runtime files", error);
@@ -67,13 +81,21 @@ export default class ObsidianMcpPlugin extends Plugin {
     });
   }
 
+  private recordChange(path: string): void {
+    this.syncState.changed(path);
+    const links = Object.keys(this.app.metadataCache.resolvedLinks[path] ?? {});
+    for (const target of new Set([...(this.knownLinks.get(path) ?? []), ...links])) this.syncState.changed(target);
+    this.knownLinks.set(path, links);
+  }
+
   onunload(): void {
     void this.stopBridge();
   }
 
   async loadSettings(): Promise<void> {
     const data = (await this.loadData()) as PersistedPluginData | null;
-    const { fallbackToken, installId, ...settings } = data ?? {};
+    const { fallbackToken, installId, embeddingKeyFallback, ...settings } = data ?? {};
+    this.embeddingKeyFallback = embeddingKeyFallback ?? "";
     delete settings.auditLog;
     this.settings = { ...DEFAULT_SETTINGS, ...settings };
     this.auditLog = Array.isArray(data?.auditLog) ? data.auditLog.slice(-100) : [];
@@ -89,8 +111,32 @@ export default class ObsidianMcpPlugin extends Plugin {
       ...this.settings,
       auditLog: this.auditLog.slice(-100),
       fallbackToken: this.fallbackToken,
+      embeddingKeyFallback: this.embeddingKeyFallback,
       installId: this.installId
     });
+  }
+
+  async getEmbeddingKey(): Promise<string> {
+    const storage = this.getSecretStorage();
+    if (storage && !this.secretStorageFailed) {
+      try { return await storage.getSecret(`${this.getTokenSecretName()}-embeddings`) ?? this.embeddingKeyFallback; }
+      catch { /* Match token fallback on older hosts. */ }
+    }
+    return this.embeddingKeyFallback;
+  }
+
+  async setEmbeddingKey(value: string): Promise<void> {
+    const storage = this.getSecretStorage();
+    if (storage && !this.secretStorageFailed) {
+      try {
+        await storage.setSecret(`${this.getTokenSecretName()}-embeddings`, value);
+        this.embeddingKeyFallback = "";
+        await this.saveSettings();
+        return;
+      } catch { /* Match token fallback on older hosts. */ }
+    }
+    this.embeddingKeyFallback = value;
+    await this.saveSettings();
   }
 
   async ensureToken(): Promise<string> {

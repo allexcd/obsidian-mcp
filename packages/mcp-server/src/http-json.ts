@@ -56,6 +56,7 @@ export function requestJson<T>(url: URL, options: JsonHttpOptions = {}): Promise
       }
     );
 
+    request.setTimeout(15000, () => request.destroy(new Error("Request timed out after 15 seconds.")));
     request.on("error", reject);
     if (body) {
       request.write(body);

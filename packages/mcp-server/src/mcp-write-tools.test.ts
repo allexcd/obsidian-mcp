@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WriteNoteResponse } from "@obsidian-mcp/shared";
 import type { McpRuntime } from "./mcp.js";
-import { startMcpServer } from "./mcp.js";
+import { indexWrittenNote, startMcpServer } from "./mcp.js";
 
 type ToolConfig = { title?: string; description?: string; inputSchema?: Record<string, unknown> };
 type ToolHandler = (input: Record<string, unknown>) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
@@ -45,6 +45,63 @@ describe("MCP write tools", () => {
     sdkMock.connect.mockClear();
     sdkMock.McpServer.mockClear();
     sdkMock.StdioServerTransport.mockClear();
+  });
+
+  it.each(["ask_vault", "search_vault", "list_notes", "related_notes", "analyze_vault"])("%s rejects cached content after live authorization changes", async name => {
+    const runtime = createRuntime();
+    const note = createWrittenNote("Private.md", "PRIVATE_CACHE_SENTINEL");
+    const row = { ...note, score: 1, snippet: "PRIVATE_CACHE_SENTINEL", contentHash: "revision", outlinks: [], backlinks: [], embeds: [], indexedAt: "2026-09-09T00:00:00Z" };
+    runtime.indexer.verifyAccess = vi.fn(async () => undefined);
+    runtime.db.getNote = vi.fn(() => row);
+    runtime.db.listNotes = vi.fn(() => [row]);
+    runtime.db.searchFts = vi.fn(() => [row]);
+    runtime.db.relatedNotes = vi.fn(() => [row]);
+    runtime.db.deleteNote = vi.fn();
+    runtime.bridge.authorize = vi.fn(async () => []);
+    await startMcpServer(runtime);
+    const response = await sdkMock.registeredTools.get(name)!.handler({query:"private", question:"private", path:"Private.md", limit:5});
+    expect(JSON.stringify(response)).not.toContain("PRIVATE_CACHE_SENTINEL");
+    expect(mockCalls(runtime.bridge,"authorize")).toEqual([[["Private.md"]]]);
+    expect(mockCalls(runtime.db,"deleteNote")).toEqual([["Private.md"]]);
+    runtime.bridge.authorize = vi.fn(async () => { throw new Error("offline"); });
+    await expect(sdkMock.registeredTools.get(name)!.handler({query:"private", question:"private", path:"Private.md", limit:5})).rejects.toThrow("offline");
+  });
+
+  it("passes retry IDs and revisions through every note write tool", async () => {
+    const runtime = createRuntime();
+    await startMcpServer(runtime);
+    const cases = [
+      ["create_note", "createNote", { path: "Notes/New.md", content: "new", overwrite: true }],
+      ["append_note", "appendNote", { path: "Notes/New.md", content: "new" }],
+      ["rewrite_note", "rewriteNote", { path: "Notes/New.md", content: "new" }],
+      ["replace_note_text", "replaceNoteText", { path: "Notes/New.md", oldText: "old", newText: "new" }],
+      ["delete_note_text", "deleteNoteText", { path: "Notes/New.md", text: "old" }],
+      ["set_note_properties", "setNoteProperties", { path: "Notes/New.md", properties: { title: "new" } }]
+    ] as const;
+    for (const [name, method, input] of cases) {
+      await sdkMock.registeredTools.get(name)!.handler({ ...input, expectedRevision: "revision", operationId: "write-1" });
+      expect(mockCalls(runtime.bridge, method).at(-1)?.slice(-2)).toEqual(["revision", "write-1"]);
+    }
+    await sdkMock.registeredTools.get("create_base_file")!.handler({ scope: { kind: "vault" }, operationId: "base-1" });
+    expect(mockCalls(runtime.bridge, "createBaseFile").at(-1)?.at(-1)).toBe("base-1");
+  });
+
+  it("does not index historical content from a replayed write receipt", () => {
+    const runtime = createRuntime();
+    const response = { operation: "append" as const, note: createWrittenNote("Notes/New.md", "old snapshot"), replayed: true };
+    const result = indexWrittenNote(runtime, response);
+    expect(mockCalls(runtime.db, "upsertNote")).toHaveLength(0);
+    expect(result.completionGuidance.verification).toContain("may have changed since");
+  });
+
+  it("compact profile hides maintenance and disabled write tools", async () => {
+    const runtime = createRuntime();
+    runtime.config.toolProfile = "compact";
+    const status = await runtime.bridge.status();
+    runtime.bridge.status = vi.fn(async () => ({...status,writeToolsEnabled:false,readOnly:true}));
+    await startMcpServer(runtime);
+    expect(sdkMock.registeredTools.has("search_vault")).toBe(true);
+    for (const name of ["refresh_index","prune_embeddings","analyze_vault","append_note","create_note"]) expect(sdkMock.registeredTools.has(name)).toBe(false);
   });
 
   it("registers separate write tools with focused tool schemas", async () => {
@@ -106,7 +163,7 @@ describe("MCP write tools", () => {
       maintenance?: { summary: string };
     };
 
-    expect(mockCalls(runtime.bridge, "createNote")).toEqual([["Notes/New.md", "# New", false]]);
+    expect(mockCalls(runtime.bridge, "createNote")).toEqual([["Notes/New.md", "# New", false, undefined, undefined]]);
     expect(mockCalls(runtime.db, "upsertNote")[0]?.[0]).toEqual(expect.objectContaining({ path: "Notes/New.md", content: "# New" }));
     expect(mockCalls(runtime.db, "pruneOrphanedEmbeddings")).toHaveLength(1);
     expect(parsed.operation).toBe("create");
@@ -150,7 +207,8 @@ describe("MCP write tools", () => {
           views: [{ type: "table", name: "Table", order: ["title", "author", "url"] }]
         },
         false,
-        false
+        false,
+        undefined
       ]
     ]);
     expect(mockCalls(runtime.db, "upsertNote")).toHaveLength(0);
@@ -247,7 +305,7 @@ describe("MCP write tools", () => {
       hint?: string;
     };
 
-    expect(mockCalls(runtime.bridge, "replaceNoteText")).toEqual([["Notes/New.md", "old", "new", 1]]);
+    expect(mockCalls(runtime.bridge, "replaceNoteText")).toEqual([["Notes/New.md", "old", "new", 1, undefined, undefined]]);
     expect(mockCalls(runtime.db, "upsertNote").length).toBeGreaterThan(0);
     expect(parsed.status).toBe("success");
     expect(parsed.completionGuidance?.nextAction).toContain("answer the user now");
@@ -276,7 +334,7 @@ describe("MCP write tools", () => {
     expect(parsed.guidance).toContain("path before content");
   });
 
-  it("rewrite_note uses the last read note path when path is blank", async () => {
+  it("rewrite_note rejects blank and missing paths even after reading a note", async () => {
     const runtime = createRuntime();
     await startMcpServer(runtime);
 
@@ -288,14 +346,11 @@ describe("MCP write tools", () => {
 
     await readTool.handler({ path: "Notes/New.md" });
     const result = await rewriteTool.handler({ path: "", content: "# Full replacement" });
-    const parsed = JSON.parse(result.content[0]!.text) as WriteNoteResponse & {
-      pathResolvedFrom?: string;
-    };
+    const parsed = JSON.parse(result.content[0]!.text) as { error: { code: string } };
+    expect(parsed.error.code).toBe("missing_path");
+    await rewriteTool.handler({ content: "# Full replacement" });
+    expect(mockCalls(runtime.bridge, "rewriteNote")).toHaveLength(0);
 
-    expect(mockCalls(runtime.bridge, "readNote")).toEqual([["Notes/New.md", undefined]]);
-    expect(mockCalls(runtime.bridge, "rewriteNote")).toEqual([["Notes/New.md", "# Full replacement"]]);
-    expect(parsed.operation).toBe("rewrite");
-    expect(parsed.pathResolvedFrom).toBe("last_read_note");
   });
 
   it("set_note_properties calls the bridge, then updates the local index", async () => {
@@ -318,7 +373,7 @@ describe("MCP write tools", () => {
       index: { noteCount: number };
     };
 
-    expect(mockCalls(runtime.bridge, "setNoteProperties")).toEqual([["Notes/New.md", properties]]);
+    expect(mockCalls(runtime.bridge, "setNoteProperties")).toEqual([["Notes/New.md", properties, undefined, undefined]]);
     expect(mockCalls(runtime.db, "upsertNote").length).toBeGreaterThan(0);
     expect(parsed.operation).toBe("properties");
     expect(parsed.status).toBe("success");

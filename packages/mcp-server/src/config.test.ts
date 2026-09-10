@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { loadConfig, resolveRuntimeConfig } from "./config.js";
 
 describe("loadConfig", () => {
+  it("uses saved search settings while respecting explicit environment overrides", async () => {
+    const config = loadConfig({OBSIDIAN_MCP_EMBEDDINGS:"off",OBSIDIAN_MCP_EMBEDDING_MODEL:"override-model",OBSIDIAN_MCP_TOOL_PROFILE:"full"});
+    const resolved=await resolveRuntimeConfig(config, {
+      status:async()=>({...createBridgeStatus({autoPruneEmbeddings:true}), search:{enabled:true,baseUrl:"http://localhost:1234/v1",model:"saved-model"},toolProfile:"compact"}),
+      searchConfig:async()=>({enabled:true,baseUrl:"http://localhost:1234/v1",model:"saved-model",apiKey:"test-key"})
+    } as never);
+    expect(resolved.embeddings).toMatchObject({enabled:false,model:"override-model",baseUrl:"http://localhost:1234/v1",apiKey:"test-key"});
+    expect(resolved.toolProfile).toBe("full");
+    expect(resolved.embeddingOverrides).toContain("OBSIDIAN_MCP_EMBEDDINGS");
+  });
+
   it("keeps embeddings off by default", () => {
     const config = loadConfig({});
     expect(config.embeddings.enabled).toBe(false);

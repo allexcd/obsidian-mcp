@@ -22,6 +22,20 @@ The token is stored in Obsidian SecretStorage when available. Older or incompati
 
 ## Embeddings
 
-Embeddings are disabled unless `OBSIDIAN_MCP_EMBEDDINGS=on`.
+Embeddings are disabled by default. Enable them in MCP clients settings or with `OBSIDIAN_MCP_EMBEDDINGS=on`. Explicit environment variables override saved settings after client reload.
 
 When enabled, chunks are sent to the configured OpenAI-compatible embedding endpoint. Local LM Studio or Ollama-compatible proxies are the safest choices. Cloud embedding providers may receive note chunks.
+
+## Cached data and changes in access
+
+The adapter synchronizes a revisioned change feed while connected, removing notes outside the current scope. Before cached search/list/related results are returned, the bridge authorizes their paths again against current content. Offline authorization fails closed. Changing exclusions cannot retract content already returned to a client, and deleting cache records is not secure disk erasure.
+
+SQLite operations use transactions and expiring maintenance leases. The cache remains a local copy of note content; protect its directory like the vault. Do not point multiple different vaults at the same database.
+
+## Concurrent edits
+
+Existing-note tools accept `expectedRevision` from a previous read. Obsidian's atomic `Vault.process` checks the revision and validates scope before committing content; conflicts leave the note unchanged. Callers that omit the revision retain compatibility but lack protection against changes since their previous read. Metadata edits merge YAML inside the same atomic operation, avoiding rollback writes that could overwrite another edit.
+
+## Credentials and diagnostics
+
+Copied configurations contain the actual bridge token; visible configuration previews mask it. Regenerating the token invalidates all existing client configurations. Optional embedding keys use SecretStorage where available and the plugin-data fallback on older hosts. The authenticated search-configuration route provides credentials only to the local adapter; ordinary status responses report configuration override names without key values.

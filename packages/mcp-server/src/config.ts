@@ -8,6 +8,8 @@ export interface EmbeddingConfig {
   apiKey: string | null;
   model: string | null;
   provider: string;
+  queryPrefix?: string;
+  documentPrefix?: string;
 }
 
 export interface ServerConfig {
@@ -20,6 +22,8 @@ export interface ServerConfig {
   autoPruneEmbeddings: boolean;
   autoPruneEmbeddingsSource: "env" | "bridge";
   embeddings: EmbeddingConfig;
+  embeddingOverrides?: string[];
+  toolProfile?: "full" | "compact";
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -32,7 +36,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     autoIndex: parseEnabled(env.OBSIDIAN_MCP_AUTO_INDEX, true),
     autoPruneEmbeddings: parseEnabled(env.OBSIDIAN_MCP_AUTO_PRUNE_EMBEDDINGS, true),
     autoPruneEmbeddingsSource: env.OBSIDIAN_MCP_AUTO_PRUNE_EMBEDDINGS === undefined ? "bridge" : "env",
+    toolProfile: env.OBSIDIAN_MCP_TOOL_PROFILE === "compact" ? "compact" : env.OBSIDIAN_MCP_TOOL_PROFILE === "full" ? "full" : undefined,
+    embeddingOverrides: Object.keys(env).filter(key => key === "OBSIDIAN_MCP_EMBEDDINGS" || key.startsWith("OBSIDIAN_MCP_EMBEDDING_")),
     embeddings: {
+      queryPrefix: env.OBSIDIAN_MCP_EMBEDDING_QUERY_PREFIX,
+      documentPrefix: env.OBSIDIAN_MCP_EMBEDDING_DOCUMENT_PREFIX,
       enabled: parseEnabled(env.OBSIDIAN_MCP_EMBEDDINGS, false),
       baseUrl: env.OBSIDIAN_MCP_EMBEDDING_BASE_URL ?? null,
       apiKey: env.OBSIDIAN_MCP_EMBEDDING_API_KEY ?? null,
@@ -44,6 +52,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
 
 export async function resolveRuntimeConfig(config: ServerConfig, bridge: BridgeClient): Promise<ServerConfig & { dbPath: string }> {
   const status = await bridge.status();
+  if (status.search) {
+    const saved = await bridge.searchConfig();
+    const overrides = new Set(config.embeddingOverrides ?? []);
+    config = { ...config, toolProfile: config.toolProfile ?? status.toolProfile ?? "full", embeddings: {
+      ...config.embeddings,
+      enabled: overrides.has("OBSIDIAN_MCP_EMBEDDINGS") ? config.embeddings.enabled : saved.enabled,
+      baseUrl: overrides.has("OBSIDIAN_MCP_EMBEDDING_BASE_URL") ? config.embeddings.baseUrl : saved.baseUrl,
+      model: overrides.has("OBSIDIAN_MCP_EMBEDDING_MODEL") ? config.embeddings.model : saved.model,
+      apiKey: overrides.has("OBSIDIAN_MCP_EMBEDDING_API_KEY") ? config.embeddings.apiKey : saved.apiKey
+    } };
+  }
   const autoPruneEmbeddings =
     config.autoPruneEmbeddingsSource === "env" ? config.autoPruneEmbeddings : status.autoPruneEmbeddings;
   if (config.dbPath) {

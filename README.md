@@ -1,184 +1,118 @@
 # MCP Vault Bridge
 
 [![CI](https://github.com/allexcd/obsidian-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/allexcd/obsidian-mcp/actions/workflows/ci.yml)
-[![Release](https://github.com/allexcd/obsidian-mcp/actions/workflows/tag-release.yml/badge.svg)](https://github.com/allexcd/obsidian-mcp/actions/workflows/tag-release.yml)
-[![License: MIT](https://img.shields.io/github/license/allexcd/obsidian-mcp)](LICENSE)
-[![Node.js >=20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Latest release](https://img.shields.io/github/v/release/allexcd/obsidian-mcp?include_prereleases&sort=semver)](https://github.com/allexcd/obsidian-mcp/releases)
+[![Release](https://img.shields.io/github/v/release/allexcd/obsidian-mcp?include_prereleases&sort=semver)](https://github.com/allexcd/obsidian-mcp/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-MCP Vault Bridge connects Obsidian to MCP clients such as Claude Desktop and LM Studio. It lets an assistant search, read, summarize, organize, and optionally edit the notes you choose to expose.
+Connect LM Studio or another MCP client to the Obsidian notes you choose to expose. Ask questions with sources, find related notes, inspect links and Properties, and optionally create or edit notes and Bases.
 
-The bridge is local, token-protected, and read-only by default.
+**Read-only by default. Embeddings are optional. Your notes remain the source of truth.**
 
-## Quick Start
+> This README describes the development version. See the [changelog](CHANGELOG.md) and your installed release before relying on newer settings or synchronization features.
 
-1. Install **MCP Vault Bridge** from Obsidian Community Plugins, or download the latest zip from [Releases](https://github.com/allexcd/obsidian-mcp/releases).
-2. Enable the plugin in Obsidian.
-3. Open the plugin settings.
-4. Click **Check runtime**.
-5. Click **Install SQLite runtime**.
-6. Copy the generated MCP client config from the plugin settings into Claude Desktop, LM Studio, or another MCP host.
-7. Restart or reload your MCP client.
-8. Ask the client: `Refresh my Obsidian vault index.`
+## How it works
 
-Then try prompts like:
-
-- "What notes do I have in my vault?"
-- "Find notes about project planning."
-- "Read Projects/Roadmap.md and summarize it."
-- "What themes appear across my notes?"
-
-## What It Can Do
-
-- Read and summarize notes.
-- List notes by folder, tag, path, or metadata.
-- Search note text.
-- Answer broad questions across the vault.
-- Show links, backlinks, tags, aliases, and related notes.
-- Use optional semantic search with local embeddings.
-- Use optional write tools to create and edit Markdown notes.
-- Create Obsidian Bases (`.base`) for folders, tags, file lists, custom filters, or the whole vault.
-
-## Connect A Client
-
-Prefer the generated config in the Obsidian plugin settings. It includes the correct token, bridge URL, and local runtime path.
-
-Manual config shape:
-
-```json
-{
-  "mcpServers": {
-    "obsidian-vault": {
-      "command": "node",
-      "args": [
-        "/ABSOLUTE/PATH/TO/Your Vault/.obsidian/plugins/mcp-vault-bridge/mcp-server.cjs"
-      ],
-      "env": {
-        "OBSIDIAN_MCP_BRIDGE_URL": "http://127.0.0.1:27125",
-        "OBSIDIAN_MCP_TOKEN": "PASTE_TOKEN_FROM_OBSIDIAN_PLUGIN"
-      }
-    }
-  }
-}
+```mermaid
+flowchart LR
+  Client[LM Studio or another MCP client] -->|MCP tools| Adapter[Local Node.js adapter]
+  Adapter -->|Authenticated local requests| Plugin[Obsidian plugin]
+  Plugin --> Vault[Allowed vault notes]
+  Adapter <--> Cache[Local SQLite search cache]
+  Adapter -. Optional passage and query embeddings .-> Embeddings[Your embedding endpoint]
 ```
 
-Use a full absolute path for `mcp-server.cjs`. Keep Obsidian open while the MCP client is using the vault.
+The client runs your **chat model**, which chooses tools and writes answers. The adapter retrieves evidence from your vault. An optional **embedding model** helps find passages with similar meaning; it does not write the answer.
 
-## Main Tools
+MCP provides access to Obsidian. Skills describe workflows, such as a weekly review, using those tools. Skills require support in your client and are not required by this plugin or installed into a model's weights.
 
-Most users do not call tools by name. The MCP client chooses them from your prompt.
+## What you need
 
-| Tool | Use it for |
+- Desktop Obsidian, open with MCP Vault Bridge enabled.
+- Node.js 20 or newer. Setup checks the executable and SQLite compatibility.
+- An MCP client with a chat model that can use tools. A local model's tool reliability affects the experience.
+- **No embedding model is needed** for standard search, reading, links, Properties, or editing.
+
+LM Studio supports MCP servers; see its [connection instructions](https://lmstudio.ai/docs/app/mcp). Cloud-model clients can send retrieved passages to their provider even though this bridge runs locally.
+
+## Quick start
+
+1. Install **MCP Vault Bridge** through Obsidian Community Plugins, or install the plugin files from [Releases](https://github.com/allexcd/obsidian-mcp/releases).
+2. Enable the plugin and open its settings.
+3. Review **Vault access**. Regular Markdown notes are included by default; exclude private folders, files, or tags. Leave editing disabled unless you need it.
+4. In **Setup**, wait for the runtime check. If needed, select **Install required components**. This installs the SQLite runtime, not an AI model.
+5. Select **Copy LM Studio** or **Copy Claude**. The copied configuration includes the existing token and resolved Node path; the on-screen preview masks the token.
+6. Merge the copied server entry into your client's `mcpServers` configuration. Preserve other servers. Reload the client's MCP servers or restart the client.
+7. Ask: **“Find notes about project planning and cite the notes you used.”**
+
+The adapter reconciles the index when it connects, then follows vault changes automatically. Standard search becomes available before semantic indexing finishes. **Setup → Refresh status** shows recent adapter activity and synchronization state. “Bridge running” alone does not mean a client is connected.
+
+Use **Refresh index** for recovery. Requests wait for the next adapter connection if none is active. Keep Obsidian open while using the bridge.
+
+## Things to try
+
+| Ask your assistant | Requires editing? |
 |---|---|
-| `vault_status` | Check bridge health, visible note count, exclusions, and detected folders. |
-| `refresh_index` | Rebuild the local index after vault or exclusion changes. |
-| `index_status` | Check whether the index and embeddings are ready. |
-| `ask_vault` | Natural questions, summaries, themes, and broad vault questions. |
-| `list_notes` | Folder, tag, path, and metadata lists. |
-| `search_vault` | Text search, with semantic search when embeddings are configured. |
-| `read_note` | Read one note by exact vault path. |
-| `get_note_metadata` | Frontmatter, tags, aliases, links, embeds, and backlinks. |
-| `get_note_links` | Outlinks, embeds, and backlinks. |
-| `related_notes` | Notes related by links and shared tags. |
-| `analyze_vault` | Deeper vault-wide synthesis. |
-| `prune_embeddings` | Clean stale embedding cache entries. Usually automatic. |
+| “Find notes titled or aliased Launch plan.” | No |
+| “What risks do my project notes mention? Cite the relevant passages.” | No |
+| “Read the Risks section of Projects/Roadmap.md.” | No |
+| “Which notes link to Projects/Roadmap.md?” | No |
+| “Give me an overview across my folders and explain how much of the vault you sampled.” | No |
+| “Set the status property of Projects/Roadmap.md to draft.” | Yes |
+| “Append these meeting decisions to Projects/Roadmap.md.” | Yes |
+| “Create a Base for the Articles/Science folder, showing title, author, and date.” | Yes |
 
-## Optional Write Tools
+Enable **Vault access → Allow creating and editing notes** for authoring. Edits can use the note revision returned by a read to reject conflicting changes. No file deletion or shell execution tool is exposed.
 
-Write tools are disabled by default. Enable **Enable write tools** in the Obsidian plugin settings only for MCP clients you trust.
+For Bases, the assistant must resolve the actual folder or file paths and choose an explicit scope. Whole-vault scope is used only when requested. Generated Bases exclude `.base` files by default.
 
-| Tool | Use it for |
+## Search: standard or by meaning?
+
+| State | What to expect |
 |---|---|
-| `create_note` | Create a Markdown note. |
-| `append_note` | Add Markdown to an existing note. |
-| `replace_note_text` | Replace exact body text in an existing note. |
-| `delete_note_text` | Delete exact body text in an existing note. |
-| `set_note_properties` | Add or update Obsidian Properties/frontmatter. |
-| `rewrite_note` | Replace an entire note. |
-| `create_base_file` | Create an Obsidian `.base` file. |
+| **Standard search** | Matches words, titles, aliases, phrases, and indexed text. Works without another model. |
+| **Building semantic index** | Standard search works; semantic coverage is still incomplete. |
+| **Semantic search ready** | Hybrid search combines keyword ranking and similarity in meaning. |
+| **Semantic search unavailable—using standard search** | The endpoint or configuration failed. Keyword search, reading, and editing remain available. |
 
-Write tools only modify non-excluded Markdown notes and `.base` files. They do not expose file deletion or shell commands.
+For example, searching for “burnout” may miss “exhaustion from work” using keywords alone. Search by meaning can help find that passage.
 
-## Obsidian Bases
+To enable it, open **MCP clients → Search → Set up search by meaning…**, enter your endpoint and exact embedding model identifier, test the request, enable the option, and reload your client. No model is downloaded automatically. See the [local embedding setup guide](docs/lm-studio-embeddings.md).
 
-Use `create_base_file` for prompts like:
+Search results are evidence, not generated answers. No-match results say so. `analyze_vault` returns a bounded sample distributed across folders and dates, with represented/total counts; it does not read every note or guarantee exhaustive conclusions.
 
-- "Create a base file for the Science folder inside Articles."
-- "Create a base for notes tagged `#book`."
-- "Create a table for these files with title, author, URL, and date."
-- "Create a base in the root of the vault for everything in the vault."
+## Access and privacy
 
-Base behavior to know:
+- The bridge listens on `127.0.0.1` and requires a bearer token.
+- Hidden/configuration folders, trash, Git internals, and traversal paths are blocked.
+- Cached results are checked against current access before they are returned. Newly excluded cached notes are removed during synchronization; enforcement does not wait for a full rebuild.
+- If current access cannot be verified, cached vault results are not returned.
+- SQLite stores a rebuildable local copy of exposed note content and optional vectors. Exclusions cannot retract information already returned to a client, and cache deletion is not a secure disk-erasure guarantee.
+- A cloud chat model may receive tool results. An external embedding endpoint may receive note passages and queries. Local chat and embedding models can keep both on your machine.
+- No telemetry is added by this plugin.
 
-- Every base needs an explicit scope: folder, files, tag, filter, or whole vault.
-- If a prompt mentions a folder by name, the client should resolve the real path first with `vault_status` or `list_notes`.
-- Folder bases are created inside the resolved folder by default. `Articles/Science` becomes `Articles/Science/Science.base`.
-- Missing folders are created only when the request clearly asks for a new folder.
-- Generated bases exclude `.base` files by default so a base does not list itself.
-- Columns, filters, sorting, formulas, summaries, and views can be translated into the generated `.base` file.
-
-## Privacy Basics
-
-- Read-only by default.
-- Token-gated local bridge on `127.0.0.1`.
-- User-configured excluded folders, files, and tags are hidden from tools.
-- Hidden folders, `.obsidian`, `.trash`, `.git`, and path traversal are always blocked.
-- No telemetry.
-
-MCP hosts may send tool results to their model. Claude Desktop runs the MCP server locally, but Claude model calls are cloud-side. LM Studio can remain fully local when both chat and embeddings use local models.
-
-See [Security Notes](docs/security.md) for more detail.
-
-## Exclusions And Indexing
-
-Regular Markdown notes are included by default. In plugin settings, you can exclude:
-
-- folders,
-- exact file paths,
-- tags.
-
-After changing exclusions, click **Refresh preview** in Obsidian, then ask your MCP client to run `refresh_index`.
-
-The SQLite index is a rebuildable cache. Your Obsidian notes remain the source of truth.
-
-## Optional Semantic Search
-
-Without embeddings, search uses local SQLite full-text search. This is fast and works well for exact words, titles, folders, tags, and phrases.
-
-With embeddings, search can also find related ideas when the same words are not used. Local LM Studio embeddings are a good privacy-preserving setup.
-
-See [LM Studio with embeddings](docs/lm-studio-embeddings.md) for setup.
+Keep copied configurations private because they contain the token. Token regeneration is under **Advanced** and requires updating every client configuration. See [security details](docs/security.md).
 
 ## Troubleshooting
 
-| Problem | Check |
-|---|---|
-| Client cannot connect | Obsidian is open, plugin is enabled, bridge URL is `http://127.0.0.1:27125`. |
-| Unauthorized error | Copy a fresh token from plugin settings. |
-| `mcp-server.cjs` missing | Rebuild or reinstall the plugin, then run **Check runtime**. |
-| `better-sqlite3` error | Click **Install SQLite runtime**. |
-| `node` not found | Install Node.js 20+ or use the absolute Node path shown in settings. |
-| Search looks stale | Run `refresh_index`. |
-| A note is missing | Check exclusions, refresh preview, then refresh the index. |
-| Write request fails | Enable write tools and confirm the path is not excluded. |
+| Symptom | Check | Action |
+|---|---|---|
+| Client cannot start the adapter | Setup runtime status | Install/repair required components; copy the newly resolved configuration. |
+| Node or SQLite compatibility error | Advanced runtime diagnostics | Use the detected compatible Node executable or set an override, then reload the client. |
+| Bridge stopped | Setup bridge status | Start the bridge; resolve a port conflict if shown. |
+| Unauthorized | Whether the token was regenerated | Copy a fresh complete configuration. |
+| Configuration ready but no client activity | Client MCP configuration | Check the entry, reload the client, and keep this vault open. |
+| Missing or stale note | Vault access and synchronization status | Check exclusions; use Refresh index if reconciliation needs recovery. |
+| Search by meaning unavailable | MCP clients embedding test and `index_status` | Check the endpoint and exact model identifier. Standard search still works. |
+| Editing rejected | Vault access / returned conflict | Enable editing if intended; on a revision conflict, read the note again before editing. |
+| Setting seems ignored | `index_status.embeddingOverrides` | Remove or update explicit environment overrides, then reload the client. |
 
-## Environment Variables
+## Reference and development
 
-Most users only need the generated client config. These variables are available for manual setups:
-
-| Variable | Description |
-|---|---|
-| `OBSIDIAN_MCP_BRIDGE_URL` | Local Obsidian bridge URL. Default: `http://127.0.0.1:27125`. |
-| `OBSIDIAN_MCP_TOKEN` | Required bearer token from plugin settings. |
-| `OBSIDIAN_MCP_DB` | Optional SQLite cache path override. |
-| `OBSIDIAN_MCP_MAX_RESULTS` | Default result cap for list and search tools. |
-| `OBSIDIAN_MCP_AUTO_PRUNE_EMBEDDINGS` | Override automatic stale embedding pruning. |
-| `OBSIDIAN_MCP_EMBEDDINGS` | Set to `on` to enable semantic search. |
-| `OBSIDIAN_MCP_EMBEDDING_BASE_URL` | OpenAI-compatible embedding endpoint. |
-| `OBSIDIAN_MCP_EMBEDDING_API_KEY` | Optional API key for the embedding endpoint. |
-| `OBSIDIAN_MCP_EMBEDDING_MODEL` | Embedding model name. |
-
-## Development
+- [Tools, configuration, and protocol reference](docs/reference.md)
+- [LM Studio with optional local embeddings](docs/lm-studio-embeddings.md)
+- [Security model](docs/security.md)
+- [Validation record](docs/validation.md)
+- [Contributing](CONTRIBUTING.md) and [changelog](CHANGELOG.md)
 
 ```bash
 npm install
@@ -189,14 +123,10 @@ npm run lint
 npm run lint:obsidian
 ```
 
-Install a development build into a local vault:
+To install a development build into a disposable vault:
 
 ```bash
 npm run plugin:install -- --vault "/absolute/path/to/Test Vault"
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch conventions and release steps.
-
-## License
-
-MIT
+The community registry lists this plugin under `mcp-vault-bridge`; a listing is not a security certification. License: [MIT](LICENSE).

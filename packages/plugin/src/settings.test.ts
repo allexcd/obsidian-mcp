@@ -10,6 +10,16 @@ describe("runtime command resolution", () => {
     vi.unstubAllEnvs();
   });
 
+  it("includes the supplied token only in copied configuration and leaves embeddings optional", () => {
+    const plugin=createPlugin();
+    const preview=buildClientConfig(plugin,false,"/node");
+    const copied=buildClientConfig(plugin,false,"/node","sample-token-for-test");
+    expect(preview).not.toContain("sample-token-for-test");
+    expect(copied).toContain("sample-token-for-test");
+    expect(copied).not.toContain("OBSIDIAN_MCP_EMBEDDINGS");
+    expect(JSON.parse(copied)).toHaveProperty("mcpServers.obsidian-vault.env.OBSIDIAN_MCP_TOKEN","sample-token-for-test");
+  });
+
   it("finds node through macOS manager fallback paths when Obsidian has a bare PATH", async () => {
     vi.stubEnv("HOME", "/Users/alex");
     vi.stubEnv("SHELL", "/bin/zsh");
