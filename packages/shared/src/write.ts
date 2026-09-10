@@ -1,7 +1,7 @@
 export class NoteEditError extends Error {
   constructor(
     message: string,
-    readonly code: "missing_text" | "ambiguous_text" | "invalid_occurrence"
+    readonly code: "missing_text" | "ambiguous_text" | "invalid_occurrence" | "revision_conflict" | "scope_denied" | "content_too_large"
   ) {
     super(message);
     this.name = "NoteEditError";

@@ -1,3 +1,7 @@
+import { parse, stringify } from "yaml";
+export const parseYaml = (text: string): unknown => parse(text);
+export const stringifyYaml = (value: unknown): string => stringify(value);
+export const requestUrl = async (): Promise<never> => { throw new Error("No HTTP mock configured"); };
 export class FileSystemAdapter {
   getBasePath(): string {
     return "";

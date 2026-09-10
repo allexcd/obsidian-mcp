@@ -95,13 +95,15 @@ describe("VaultIndexer", () => {
 function createBridge(): { bridge: BridgeClient; exportNotes: ReturnType<typeof vi.fn> } {
   const exportNotes = vi.fn(() => Promise.resolve({ notes: [sampleNote], nextOffset: null }));
   return {
-    bridge: { exportNotes } as unknown as BridgeClient,
+    bridge: { exportNotes, sync: async () => ({epoch: "one", revision: 0, policyRevision: "p", allowedPaths: [sampleNote.path], reset: false, paths: [], refreshRequest: 0}), report: async () => undefined } as unknown as BridgeClient,
     exportNotes
   };
 }
 
 function createDb(getNoteCount: () => number, onReplace: (notes: VaultNote[]) => void = () => undefined): VaultDatabase {
   return {
+    withSyncLock: (work: () => Promise<unknown>) => work(),
+    retainAllowed: vi.fn(),
     stats: (): IndexStats => ({
       noteCount: getNoteCount(),
       chunkCount: getNoteCount(),

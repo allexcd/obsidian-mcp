@@ -1,6 +1,6 @@
 {
   "name": "@obsidian-mcp/plugin",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,10 +8,11 @@
     "dev": "node esbuild.config.mjs --watch"
   },
   "dependencies": {
-    "@obsidian-mcp/shared": "0.5.5",
+    "@obsidian-mcp/shared": "0.5.6",
     "vitest": "4.1.9"
   },
   "devDependencies": {
-    "obsidian": "^1.8.7"
+    "obsidian": "^1.8.7",
+    "yaml": "^2.9.0"
   }
 }

@@ -1,98 +1,43 @@
-# LM Studio with Embeddings
+# Optional local semantic search with LM Studio
 
-Embeddings make vault search semantic. Without them the MCP uses SQLite full-text search, which matches exact words and phrases. With a local embedding model, searches find related ideas even when the exact words do not appear.
+**Start with standard search.** An embedding model is not required to connect Obsidian, read notes, search keywords, inspect links, or edit notes.
 
-Recommended model: [`nomic-ai/nomic-embed-text-v1.5`](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5) — a good default that works with LM Studio's OpenAI-compatible `/v1/embeddings` endpoint.
+Your chat model writes answers from retrieved evidence. An embedding model helps retrieve notes whose wording differs from your question. For example, “burnout” can retrieve a note about “exhaustion from work.”
 
-## 1. Install the plugin
+## Setup
 
-Follow the [main install steps](../README.md#install) first. Make sure the SQLite runtime is installed and the plugin is enabled before continuing.
+1. Complete the [basic connection](../README.md#quick-start).
+2. In LM Studio, load an embedding model and start its local server. Nothing is downloaded by this plugin.
+3. Open **MCP Vault Bridge → MCP clients → Search → Set up search by meaning…**.
+4. Enter the base URL, normally `http://127.0.0.1:1234/v1`, and the exact embedding model identifier from your LM Studio installation. A chat-model identifier may not support embeddings.
+5. Select **Test embedding request**. This sends only a synthetic “Connection test” string, not vault content. A successful response confirms the endpoint returns vectors; it is not a retrieval-quality benchmark.
+6. Enable **Search by meaning** and reload your client's MCP servers. The adapter reads these saved settings automatically. Existing environment variables override matching settings.
+7. Watch `index_status` or **Setup → Refresh status**. Standard search works while embeddings build.
 
-## 2. Download an embedding model in LM Studio
+If the endpoint needs a key, use the optional API-key field. It uses the plugin's secret-storage approach; older hosts may use the labeled plugin-data fallback.
 
-```bash
-lms get nomic-ai/nomic-embed-text-v1.5
-```
+## A tested local example
 
-Or search for `nomic-ai/nomic-embed-text-v1.5` in the LM Studio UI and download from there.
+A synthetic-vault smoke test on 2026-09-09 used LM Studio **0.4.20+1**, base URL `http://127.0.0.1:1234/v1`, and model identifier **`text-embedding-nomic-embed-text-v1.5@f32`**. Semantic search for “burnout and fatigue” ranked the sample wellbeing note first, despite different wording. Identifiers vary by installation; do not assume this exact one exists on yours.
 
-## 3. Start LM Studio's local server
+The [Nomic model card](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5) specifies task prefixes. The adapter adds `search_document: ` for note passages and `search_query: ` for questions when the model identifier contains `nomic-embed-text`. If your endpoint already applies them, use the [prefix overrides](reference.md#environment-variables) to avoid doubling them. No dimensionality reduction is requested.
 
-1. Load `nomic-embed-text-v1.5` as an embedding model.
-2. Start the local server (default URL: `http://127.0.0.1:1234/v1`).
-3. Verify it is running:
+This verifies one local setup, not every model or quantization. For another model, test both the endpoint and several questions whose correct source notes you know.
 
-```bash
-curl http://127.0.0.1:1234/v1/models
-```
+## What happens if something fails?
 
-Note the exact model identifier in the response — use that value for `OBSIDIAN_MCP_EMBEDDING_MODEL` if it differs from `nomic-embed-text-v1.5`.
-
-## 4. Configure LM Studio `mcp.json`
-
-Open the LM Studio MCP settings and edit `mcp.json`. Use the full absolute path to `mcp-server.cjs` and paste the token from Obsidian plugin settings.
-
-```json
-{
-  "mcpServers": {
-    "obsidian-vault": {
-      "command": "node",
-      "args": [
-        "/ABSOLUTE/PATH/TO/Your Vault/.obsidian/plugins/mcp-vault-bridge/mcp-server.cjs"
-      ],
-      "env": {
-        "OBSIDIAN_MCP_BRIDGE_URL": "http://127.0.0.1:27125",
-        "OBSIDIAN_MCP_TOKEN": "PASTE_TOKEN_FROM_OBSIDIAN_PLUGIN",
-        "OBSIDIAN_MCP_EMBEDDINGS": "on",
-        "OBSIDIAN_MCP_EMBEDDING_BASE_URL": "http://127.0.0.1:1234/v1",
-        "OBSIDIAN_MCP_EMBEDDING_MODEL": "nomic-embed-text-v1.5"
-      }
-    }
-  }
-}
-```
-
-> **Paths on macOS/Linux:** use the full path starting with `/`. Spaces are fine in JSON — do not escape them with `\`. If your vault is in Google Drive the real path starts with `/Users/USERNAME/Library/CloudStorage/GoogleDrive-ACCOUNT/My Drive/...`, not `My Drive/...`.
-
-Reload MCP servers in LM Studio after saving.
-
-## 5. Build the vault index
-
-Ask LM Studio to run the index refresh tool:
-
-```text
-Use the Obsidian vault tool to refresh the index.
-```
-
-The first run reads all included notes, chunks them, stores metadata and full-text data in SQLite, and sends chunks to the embedding endpoint. Embeddings are cached so later refreshes only process changed notes.
-
-After indexing, try:
-
-```text
-Search my Obsidian vault for notes related to long-term project risks.
-```
-
-```text
-Find notes related to Projects/My Project.md.
-```
-
-## Troubleshooting
-
-| Symptom | Fix |
+| Situation | Behavior |
 |---|---|
-| `args` path starts with `.lmstudio/extensions/...` | The path is relative. Use the full absolute path to `mcp-server.cjs`. |
-| `Cannot find module 'better-sqlite3'` | SQLite runtime is missing. In Obsidian plugin settings: **Check runtime → Install SQLite runtime**. Requires Node.js 20+. |
-| `NODE_MODULE_VERSION` mismatch for `better-sqlite3.node` | LM Studio is launching the MCP server with a different Node.js major version than the one that installed SQLite. Set `command` in `mcp.json` to the compatible Node path shown in Obsidian's MCP Clients section, or rerun **Install SQLite runtime** with the Node version you want to use. |
-| `node` command not found | Install Node.js 20+ or set `command` to the absolute path of the `node` executable. |
-| MCP server disconnected in LM Studio | Confirm `mcp-server.cjs` exists at the configured path. Run `npm run plugin:install -- --vault "/path/to/vault"` to reinstall. |
-| MCP server cannot reach Obsidian | Keep Obsidian open with the plugin enabled. Bridge must be running on `127.0.0.1:27125`. |
-| Unauthorized errors | Copy a fresh token from Obsidian plugin settings and update `OBSIDIAN_MCP_TOKEN`. |
-| Embedding errors | Confirm LM Studio's local server is running and `curl http://127.0.0.1:1234/v1/models` lists the embedding model. |
-| Model not found | Replace `nomic-embed-text-v1.5` with the exact identifier shown by LM Studio. |
-| Want to disable embeddings | Remove `OBSIDIAN_MCP_EMBEDDINGS`, `OBSIDIAN_MCP_EMBEDDING_BASE_URL`, and `OBSIDIAN_MCP_EMBEDDING_MODEL`. Full-text search continues to work. |
+| No embedding configuration | Standard search; no embedding requests. |
+| Model is still indexing | Standard search plus any available semantic candidates; coverage may be incomplete. |
+| Endpoint stopped, model missing, or request failed | Keyword fallback, with the actual mode and reason in the result. |
+| Model/endpoint/prefix changed | Separate vector identity; rebuild in the background after client reload. |
+| Invalid response ordering or dimensions | Reject invalid vectors; keep standard search available. |
 
-## References
+A full text refresh is available in Settings for recovery. You normally do not need to ask the assistant to refresh after editing notes.
 
-- [LM Studio MCP docs](https://lmstudio.ai/docs/app/mcp/)
-- [LM Studio OpenAI-compatible endpoints](https://lmstudio.ai/docs/developer/openai-compat)
-- [LM Studio embedding docs](https://lmstudio.ai/docs/python/embedding)
+## Privacy
+
+Enabled embeddings send included passages and search queries to the configured endpoint. Use a loopback URL for a model on your own machine. Cloud endpoints receive that text. The chat model is configured separately by your client and can independently be local or cloud-hosted.
+
+See [LM Studio MCP documentation](https://lmstudio.ai/docs/app/mcp), [OpenAI-compatible endpoints](https://lmstudio.ai/docs/developer/openai-compat), and the [complete configuration reference](reference.md).

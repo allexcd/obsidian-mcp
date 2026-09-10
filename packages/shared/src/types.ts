@@ -15,7 +15,31 @@ export interface VaultScopePreview {
   excludedNoteCount: number;
 }
 
+export interface BridgeSync {
+  epoch: string;
+  revision: number;
+  policyRevision: string;
+  reset: boolean;
+  paths: string[];
+  allowedPaths: string[];
+  refreshRequest: number;
+}
+
+export interface AdapterReport {
+  at: string;
+  indexing: boolean;
+  lastError: string | null;
+  lastSyncedAt?: string | null;
+  pending?: number;
+  searchState?: string;
+  embeddingError?: string | null;
+}
+
 export interface BridgeStatus {
+  policyRevision?: string;
+  search?: { enabled: boolean; baseUrl: string; model: string };
+  toolProfile?: "full" | "compact";
+  adapterReport?: AdapterReport | null;
   ok: true;
   vaultName: string;
   pluginVersion: string;
@@ -64,12 +88,20 @@ export interface VaultNoteSummary {
 }
 
 export interface VaultNote extends VaultNoteSummary {
+  revision?: string;
   content: string;
   truncated: boolean;
   metadata: NoteMetadata;
 }
 
 export interface SearchResult {
+  heading?: string | null;
+  startLine?: number;
+  endLine?: number;
+  revision?: string;
+  truncated?: boolean;
+  evidence?: "direct" | "linked";
+  passages?: Array<{ heading: string | null; text: string }>;
   path: string;
   title: string;
   score: number;
@@ -115,4 +147,11 @@ export interface PruneEmbeddingsResult {
   orphanedAfterCount: number;
   deletedEmbeddings: number;
   estimatedBytesFreed: number;
+}
+
+export interface CreateFolderResponse {
+  operation: "create_folder";
+  path: string;
+  status: "created" | "already_exists";
+  replayed?: boolean;
 }

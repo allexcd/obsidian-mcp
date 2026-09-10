@@ -6,6 +6,26 @@ import type { VaultNote } from "@obsidian-mcp/shared";
 import { VaultDatabase } from "./database.js";
 
 describe("VaultDatabase", () => {
+  it("matches aliases, phrases, unicode, and headings", () => {
+    const db = new VaultDatabase(join(mkdtempSync(join(tmpdir(), "obsidian-mcp-")), "index.sqlite"));
+    const alias=makeNote("Plan.md","# Launch\n## Supplier risks\nShipping needs review.",[]);
+    alias.aliases=["Launch plan"];
+    db.replaceNotes([alias,makeNote("Other.md","The plan for launch is different. Café notes.",[])]);
+    expect(db.searchFts('"Launch plan"',10,0).map(row=>row.path)).toEqual(["Plan.md"]);
+    expect(db.searchFts("Supplier risks",10,0)[0]?.path).toBe("Plan.md");
+    expect(db.searchFts("café",10,0)[0]?.path).toBe("Other.md");
+    db.close();
+  });
+
+  it("deduplicates semantic chunks before limiting notes", () => {
+    const db = new VaultDatabase(join(mkdtempSync(join(tmpdir(), "obsidian-mcp-")), "index.sqlite"));
+    db.replaceNotes([makeNote("A.md","# A\none\n## B\ntwo",[]),makeNote("B.md","# Other\nthree",[])]);
+    for(const chunk of db.chunksMissingEmbeddings("test","model",10)) db.upsertEmbedding(chunk.contentHash,"test","model",chunk.path==="A.md"?[1,0]:[0.9,0.1]);
+    expect(db.semanticSearch([1,0],"test","model",2).map(row=>row.path)).toEqual(["A.md","B.md"]);
+    expect(()=>db.semanticSearch([1,0,0],"test","model",2)).toThrow("dimensions changed");
+    db.close();
+  });
+
   it("indexes notes into SQLite and searches with FTS", () => {
     const db = new VaultDatabase(join(mkdtempSync(join(tmpdir(), "obsidian-mcp-")), "index.sqlite"));
     db.replaceNotes([

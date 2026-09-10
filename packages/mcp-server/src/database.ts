@@ -1,3 +1,4 @@
+import { setTimeout, setInterval, clearInterval } from "node:timers";
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
@@ -51,6 +52,7 @@ export class VaultDatabase {
     this.db = new Database(path);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
+    this.db.pragma("busy_timeout = 5000");
     this.migrate();
   }
 
@@ -90,7 +92,11 @@ export class VaultDatabase {
   }
 
   upsertNote(note: VaultNote): void {
-    const contentHash = sha256(note.content);
+    this.db.transaction(() => this.writeNote(note)).immediate();
+  }
+
+  private writeNote(note: VaultNote): void {
+    const contentHash = note.revision ?? sha256(note.content);
     const indexedAt = new Date().toISOString();
     const metadata = note.metadata;
 
@@ -133,21 +139,53 @@ export class VaultDatabase {
     this.db.prepare("DELETE FROM note_fts WHERE path = ?").run(note.path);
     this.db
       .prepare("INSERT INTO note_fts(path, title, content, tags) VALUES (?, ?, ?, ?)")
-      .run(note.path, note.title, note.content, note.tags.join(" "));
+      .run(note.path, `${note.title} ${note.aliases.join(" ")}`, note.content, note.tags.join(" "));
 
+    const old = this.db.prepare("SELECT content_hash FROM chunks WHERE path = ? ORDER BY chunk_index").all(note.path) as Array<{content_hash: string}>;
+    const chunks = chunkMarkdown(note.path, note.content);
+    if (old.length === chunks.length && chunks.every((chunk, i) => sha256(chunk.content) === old[i]?.content_hash)) return;
     this.db.prepare("DELETE FROM chunks WHERE path = ?").run(note.path);
     const insertChunk = this.db.prepare(
       "INSERT INTO chunks(path, chunk_index, heading, content, content_hash) VALUES (?, ?, ?, ?, ?)"
     );
-    for (const chunk of chunkMarkdown(note.path, note.content)) {
+    for (const chunk of chunks) {
       insertChunk.run(chunk.path, chunk.index, chunk.heading, chunk.content, sha256(chunk.content));
     }
   }
 
   deleteNote(path: string): void {
-    this.db.prepare("DELETE FROM note_fts WHERE path = ?").run(path);
-    this.db.prepare("DELETE FROM chunks WHERE path = ?").run(path);
-    this.db.prepare("DELETE FROM notes WHERE path = ?").run(path);
+    this.db.transaction(() => {
+      this.db.prepare("DELETE FROM note_fts WHERE path = ?").run(path);
+      this.db.prepare("DELETE FROM chunks WHERE path = ?").run(path);
+      this.db.prepare("DELETE FROM notes WHERE path = ?").run(path);
+    }).immediate();
+  }
+
+  retainAllowed(paths: string[]): void {
+    const allowed = new Set(paths);
+    this.db.transaction(() => {
+      for (const row of this.db.prepare("SELECT path FROM notes").all() as Array<{path: string}>) {
+        if (!allowed.has(row.path)) this.deleteNote(row.path);
+      }
+      this.pruneOrphanedEmbeddings();
+    }).immediate();
+  }
+
+  async withSyncLock<T>(work: () => Promise<T>, lockId = 1): Promise<T> {
+    const owner = `${process.pid}:${Math.random()}`;
+    const acquire = this.db.prepare("INSERT INTO sync_lock(id, owner, expires) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET owner=excluded.owner, expires=excluded.expires WHERE sync_lock.expires < ?");
+    const deadline = Date.now() + 30000;
+    while (!acquire.run(lockId, owner, Date.now() + 60000, Date.now()).changes) {
+      if (Date.now() > deadline) throw new Error("Another client is synchronizing this index. Try again shortly.");
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    const heartbeat = setInterval(() => this.db.prepare("UPDATE sync_lock SET expires=? WHERE owner=?").run(Date.now() + 60000, owner), 10000);
+    heartbeat.unref();
+    try { return await work(); }
+    finally {
+      clearInterval(heartbeat);
+      this.db.prepare("DELETE FROM sync_lock WHERE owner=?").run(owner);
+    }
   }
 
   listNotes(options: { query?: string; tag?: string; folder?: string; limit: number; offset: number }): IndexedNote[] {
@@ -188,13 +226,13 @@ export class VaultDatabase {
     try {
       const rows = this.db
         .prepare(
-          `SELECT n.path, n.title, n.mtime, n.tags_json, bm25(note_fts) AS score,
+          `SELECT n.path, n.title, n.mtime, n.tags_json, bm25(note_fts, 0, 8, 1, 3) AS score,
             snippet(note_fts, 2, '[', ']', '...', 18) AS snippet
            FROM note_fts JOIN notes n ON n.path = note_fts.path
            WHERE note_fts MATCH ?
-           ORDER BY score ASC LIMIT ? OFFSET ?`
+           ORDER BY CASE WHEN lower(n.title) = lower(?) OR EXISTS (SELECT 1 FROM json_each(n.aliases_json) WHERE lower(value) = lower(?)) THEN 0 ELSE 1 END, score ASC, n.path ASC LIMIT ? OFFSET ?`
         )
-        .all(match, limit, offset) as Array<{ path: string; title: string; mtime: number; tags_json: string; score: number; snippet: string }>;
+        .all(match, query.replace(/^"|"$/g, ""), query.replace(/^"|"$/g, ""), limit, offset) as Array<{ path: string; title: string; mtime: number; tags_json: string; score: number; snippet: string }>;
       return rows.map((row) => ({
         path: row.path,
         title: row.title,
@@ -272,17 +310,17 @@ export class VaultDatabase {
     this.db
       .prepare(
         `INSERT INTO embeddings(content_hash, provider, model, vector_json, dim, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+         SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM chunks WHERE content_hash = ?)
          ON CONFLICT(content_hash, provider, model) DO UPDATE SET
            vector_json = excluded.vector_json,
            dim = excluded.dim,
            updated_at = excluded.updated_at`
       )
-      .run(contentHash, provider, model, JSON.stringify(vector), vector.length, new Date().toISOString());
+      .run(contentHash, provider, model, JSON.stringify(vector), vector.length, new Date().toISOString(), contentHash);
   }
 
   pruneOrphanedEmbeddings(): PruneEmbeddingsResult {
-    return pruneOrphanedEmbeddingsInDatabase(this.db);
+    return this.db.transaction(() => pruneOrphanedEmbeddingsInDatabase(this.db)).immediate();
   }
 
   semanticSearch(queryVector: number[], provider: string, model: string, limit: number): SearchResult[] {
@@ -304,7 +342,11 @@ export class VaultDatabase {
       tags_json: string;
     }>;
 
-    return rows
+    if (rows.some(row => (parseJson<number[]>(row.vector_json, [])).length !== queryVector.length)) {
+      this.db.prepare("DELETE FROM embeddings WHERE provider = ? AND model = ?").run(provider, model);
+      throw new Error("Embedding dimensions changed. Cached vectors were reset; background indexing or Refresh index will rebuild them. Standard search remains available.");
+    }
+    const ranked = rows
       .map((row) => {
         const vector = parseJson<number[]>(row.vector_json, []);
         return {
@@ -313,15 +355,23 @@ export class VaultDatabase {
           mtime: row.mtime,
           tags: parseJson<string[]>(row.tags_json, []),
           score: cosineSimilarity(queryVector, vector),
+          heading: row.heading,
           snippet: `${row.heading ? `${row.heading}: ` : ""}${row.content.slice(0, 360).replace(/\s+/g, " ")}`
         };
       })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
+      .sort((a, b) => b.score - a.score);
+    const unique = new Map<string, SearchResult>();
+    for (const item of ranked) {
+      const existing = unique.get(item.path);
+      if (!existing) unique.set(item.path, { ...item, passages: [{ heading: item.heading ?? null, text: item.snippet }] });
+      else if ((existing.passages?.length ?? 0) < 3) existing.passages?.push({ heading: item.heading ?? null, text: item.snippet });
+    }
+    return [...unique.values()].slice(0, limit);
   }
 
   private migrate(): void {
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS sync_lock (id INTEGER PRIMARY KEY, owner TEXT NOT NULL, expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS notes (
         path TEXT PRIMARY KEY,
         title TEXT NOT NULL,
@@ -466,18 +516,15 @@ function parseJson<T>(value: string, fallback: T): T {
 }
 
 function toFtsQuery(query: string): string {
-  return query
-    .split(/\s+/)
-    .map((term) => term.replace(/[^A-Za-z0-9_/-]/g, ""))
-    .filter(Boolean)
-    .map((term) => `"${term}"*`)
-    .join(" ");
+  const phrases = query.match(/"[^"]+"|[\p{L}\p{N}_/-]+/gu) ?? [];
+  return phrases.map(term => term.startsWith('"') ? term : `"${term}"*`).join(" OR ");
 }
 
 function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length === 0 || a.length !== b.length) {
     return 0;
   }
+  if (a.some(value => !Number.isFinite(value)) || b.some(value => !Number.isFinite(value))) return 0;
   let dot = 0;
   let aMag = 0;
   let bMag = 0;

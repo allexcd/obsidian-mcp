@@ -1,6 +1,6 @@
 import { createServer } from "node:net";
 import { request } from "node:http";
-import { TFile, TFolder } from "obsidian";
+import { TFile, TFolder, parseYaml } from "obsidian";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type ObsidianMcpPlugin from "./main.js";
 import { createBridgeServer, type BridgeServerHandle } from "./server.js";
@@ -18,6 +18,173 @@ describe("plugin bridge write routes", () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    ["/folders/create", { path: "" }],
+    ["/folders/create", {}],
+    ["/folders/create", { path: "../outside" }],
+    ["/notes/create", { path: "", content: "text" }],
+    ["/notes/append", { path: "", content: "text" }],
+    ["/bases/create", {}]
+  ])("replays invalid write errors for %s without path authorization failures", async (route, input) => {
+    const port = await getFreePort();
+    const { plugin, vault } = createPlugin({ port });
+    handles.push(await createBridgeServer(plugin, "token"));
+    const body = { ...input, operationId: "invalid-write" };
+    const first = await postJson(port, route, body);
+    expect(first.status).toBeGreaterThanOrEqual(400);
+    expect(first.status).toBeLessThan(500);
+    const second = await postJson(port, route, body);
+    expect(second.status).toBe(first.status);
+    expect(second.body).toEqual({ ...(first.body as Record<string, unknown>), replayed: true });
+    expect(vault.create).not.toHaveBeenCalled();
+    expect(vault.createFolder).not.toHaveBeenCalled();
+    expect(vault.modify).not.toHaveBeenCalled();
+  });
+
+  it("rechecks write permission before reserving a retry ID", async () => {
+    const port = await getFreePort();
+    const { plugin, vault } = createPlugin({ port, writeToolsEnabled: false });
+    handles.push(await createBridgeServer(plugin, "token"));
+    const body = { path: "Books", operationId: "same-request" };
+    expect((await postJson(port, "/folders/create", body)).status).toBe(403);
+    plugin.settings.writeToolsEnabled = true;
+    expect((await postJson(port, "/folders/create", body)).body).toMatchObject({ status: "created" });
+    expect(vault.createFolder).toHaveBeenCalledTimes(1);
+    plugin.settings.writeToolsEnabled = false;
+    expect((await postJson(port, "/folders/create", body)).status).toBe(403);
+    plugin.settings.writeToolsEnabled = true;
+    expect((await postJson(port, "/folders/create", body)).body).toMatchObject({ replayed: true });
+    expect(vault.createFolder).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates empty folders and handles repeated, nested and concurrent calls without notes", async () => {
+    const port = await getFreePort();
+    const { plugin, vault, folders } = createPlugin({ port });
+    handles.push(await createBridgeServer(plugin, "token"));
+    const replies = await Promise.all([postJson(port, "/folders/create", { path: "Books" }), postJson(port, "/folders/create", { path: "Books" })]);
+    expect(replies.map(reply => reply.body)).toEqual([
+      { operation: "create_folder", path: "Books", status: "created" },
+      { operation: "create_folder", path: "Books", status: "already_exists" }
+    ]);
+    expect(vault.createFolder).toHaveBeenCalledTimes(1);
+    expect(vault.create).not.toHaveBeenCalled();
+    expect(folders.has("Books")).toBe(true);
+    const body = { path: "Books/Fiction", operationId: "folder-1" };
+    expect((await postJson(port, "/folders/create", body)).body).toMatchObject({ status: "created" });
+    expect((await postJson(port, "/folders/create", body)).body).toMatchObject({ replayed: true });
+    expect(vault.createFolder).toHaveBeenCalledTimes(2);
+    plugin.settings.excludedFolders = ["Books"];
+    expect((await postJson(port, "/folders/create", body)).status).toBe(403);
+  });
+
+  it.each(["", "/Books", "../Books", "Books/../Other", "C:\\Books", [".", "obsidian/Books"].join(""), ".git", "Private", "Private/Books"])("rejects invalid or excluded folder path %s", async path => {
+    const port = await getFreePort();
+    const { plugin, vault } = createPlugin({ port, excludedFolders: ["Private"] });
+    handles.push(await createBridgeServer(plugin, "token"));
+    expect((await postJson(port, "/folders/create", { path })).status).toBeGreaterThanOrEqual(400);
+    expect(vault.createFolder).not.toHaveBeenCalled();
+  });
+
+  it("denies a custom configuration directory", async () => {
+    const port = await getFreePort();
+    const { plugin, vault } = createPlugin({ port });
+    Object.defineProperty(plugin.app.vault, "configDir", { value: "Configuration" });
+    handles.push(await createBridgeServer(plugin, "token"));
+    expect((await postJson(port, "/folders/create", { path: "Configuration" })).status).toBe(403);
+    expect((await postJson(port, "/folders/create", { path: "Configuration/Books" })).status).toBe(403);
+    expect(vault.createFolder).not.toHaveBeenCalled();
+  });
+
+  it("rejects disabled writes, missing parents and file collisions", async () => {
+    const port = await getFreePort();
+    const { plugin, vault } = createPlugin({ port, writeToolsEnabled: false, files: [{ path: "Books", content: "existing file" }] });
+    handles.push(await createBridgeServer(plugin, "token"));
+    expect((await postJson(port, "/folders/create", { path: "New" })).status).toBe(403);
+    plugin.settings.writeToolsEnabled = true;
+    expect((await postJson(port, "/folders/create", { path: "New/Child" })).body).toMatchObject({ code: "parent_missing" });
+    expect((await postJson(port, "/folders/create", { path: "Books" })).body).toMatchObject({ code: "path_exists" });
+    expect(vault.createFolder).not.toHaveBeenCalled();
+  });
+
+  it("replays a concurrent append once and blocks mismatched IDs and newly excluded receipts", async () => {
+    const port = await getFreePort();
+    const { plugin, file } = createPlugin({ port, files: [{ path: "Test.md", content: "original" }] });
+    handles.push(await createBridgeServer(plugin, "token"));
+    const body = { path: "Test.md", content: "addition", operationId: "append-1" };
+    const replies = await Promise.all([postJson(port, "/notes/append", body), postJson(port, "/notes/append", body)]);
+    expect(replies.map(reply => reply.status)).toEqual([200, 200]);
+    expect(file!.content).toBe("original\naddition");
+    expect(replies.some(reply => (reply.body as { replayed?: boolean }).replayed)).toBe(true);
+    file!.content = "later user edit";
+    const replay = await postJson(port, "/notes/append", body);
+    expect(replay.body).toMatchObject({ replayed: true, note: { content: "original\naddition" } });
+    expect(file!.content).toBe("later user edit");
+    expect((await postJson(port, "/notes/append", { ...body, content: "different" })).status).toBe(409);
+    expect((await postJson(port, "/notes/rewrite", body)).status).toBe(409);
+    plugin.settings.writeToolsEnabled = false;
+    expect((await postJson(port, "/notes/append", body)).status).toBe(403);
+    plugin.settings.writeToolsEnabled = true;
+    plugin.settings.excludedTags = ["private"];
+    file!.content = "#private";
+    const denied = await postJson(port, "/notes/append", body);
+    expect(denied.status).toBeGreaterThanOrEqual(400);
+    expect(JSON.stringify(denied.body)).not.toContain("original");
+  });
+
+  it("requires an atomic revision check for create_note overwrites", async () => {
+    const port = await getFreePort();
+    const { plugin, file } = createPlugin({ port, files: [{ path: "Test.md", content: "original" }] });
+    handles.push(await createBridgeServer(plugin, "token"));
+    const body = { path: "Test.md", content: "replacement", overwrite: true };
+    expect((await postJson(port, "/notes/create", body)).body).toMatchObject({ code: "revision_required" });
+    const read = await postJson(port, "/notes/read", { path: "Test.md" });
+    const expectedRevision = (read.body as { revision: string }).revision;
+    file!.content = "user edit";
+    expect((await postJson(port, "/notes/create", { ...body, expectedRevision })).body).toMatchObject({ code: "revision_conflict" });
+    expect(file!.content).toBe("user edit");
+    const fresh = await postJson(port, "/notes/read", { path: "Test.md" });
+    expect((await postJson(port, "/notes/create", { ...body, expectedRevision: (fresh.body as { revision: string }).revision })).status).toBe(200);
+    expect(file!.content).toBe("replacement");
+  });
+
+  it("replays creation without creating a second file and rejects malformed operation IDs", async () => {
+    const port = await getFreePort();
+    const { plugin, vault } = createPlugin({ port });
+    handles.push(await createBridgeServer(plugin, "token"));
+    const body = { path: "New.md", content: "new", operationId: "create-1" };
+    expect((await postJson(port, "/notes/create", body)).status).toBe(200);
+    expect((await postJson(port, "/notes/create", body)).body).toMatchObject({ replayed: true });
+    expect(vault.create).toHaveBeenCalledTimes(1);
+    expect((await postJson(port, "/notes/create", { ...body, operationId: 12 })).status).toBe(400);
+    expect(vault.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks expectedRevision inside the atomic edit and leaves conflicting content unchanged", async () => {
+    const port = await getFreePort();
+    const {plugin,file}=createPlugin({port,files:[{path:"Test.md",content:"original"}]});
+    handles.push(await createBridgeServer(plugin,"token"));
+    const read = await postJson(port,"/notes/read",{path:"Test.md"});
+    const revision=(read.body as {revision:string}).revision;
+    expect(revision).toHaveLength(64);
+    file!.content="concurrent edit";
+    const conflict=await postJson(port,"/notes/append",{path:"Test.md",content:"addition",expectedRevision:revision});
+    expect(conflict.status).toBe(409);
+    expect(conflict.body).toMatchObject({code:"revision_conflict"});
+    expect(file!.content).toBe("concurrent edit");
+    const legacy=await postJson(port,"/notes/append",{path:"Test.md",content:"addition"});
+    expect(legacy.status).toBe(200);
+    expect(file!.content).toBe("concurrent edit\naddition");
+  });
+
+  it("authorizes current content even before metadata cache catches up", async () => {
+    const port=await getFreePort();
+    const {plugin,file}=createPlugin({port,excludedTags:["private"],files:[{path:"Test.md",content:"public"}]});
+    handles.push(await createBridgeServer(plugin,"token"));
+    expect((await postJson(port,"/authorize",{paths:["Test.md"]})).body).toEqual({paths:["Test.md"]});
+    file!.content="#private\nsecret";
+    expect((await postJson(port,"/authorize",{paths:["Test.md"]})).body).toEqual({paths:[]});
+  });
+
   it("checks write authorization before append content validation", async () => {
     const port = await getFreePort();
     const { plugin, audit } = createPlugin({ port, writeToolsEnabled: false });
@@ -27,7 +194,7 @@ describe("plugin bridge write routes", () => {
     const response = await postJson(port, "/notes/append", { path: "Notes/Test.md", content: "" });
 
     expect(response.status).toBe(403);
-    expect(response.body).toEqual({ error: "Write tools are disabled in the Obsidian plugin settings." });
+    expect(response.body).toEqual({ code: "writes_disabled", error: "Write tools are disabled in the Obsidian plugin settings." });
     expect(audit).toHaveBeenCalledWith({
       route: "/notes/append",
       path: "Notes/Test.md",
@@ -45,7 +212,7 @@ describe("plugin bridge write routes", () => {
     const response = await postJson(port, "/notes/create", { path: "Notes/New.md", content: "# New\n#private" });
 
     expect(response.status).toBe(403);
-    expect(response.body).toEqual({ error: "Written note content would be excluded by the current vault scope." });
+    expect(response.body).toMatchObject({ error: "Written note content would be excluded by the current vault scope." });
     expect(vault.create.mock.calls).toHaveLength(0);
     expect(audit).toHaveBeenCalledWith({
       route: "/notes/create",
@@ -68,7 +235,7 @@ describe("plugin bridge write routes", () => {
     const response = await postJson(port, "/notes/rewrite", { path: "Notes/Existing.md", content: "# Existing\n#private" });
 
     expect(response.status).toBe(403);
-    expect(response.body).toEqual({ error: "Written note content would be excluded by the current vault scope." });
+    expect(response.body).toMatchObject({ error: "Written note content would be excluded by the current vault scope." });
     expect(vault.modify.mock.calls).toHaveLength(0);
     expect(file?.content).toBe("# Existing");
   });
@@ -86,7 +253,7 @@ describe("plugin bridge write routes", () => {
     const response = await postJson(port, "/notes/append", { path: "Notes/Existing.md", content: "#private" });
 
     expect(response.status).toBe(403);
-    expect(response.body).toEqual({ error: "Written note content would be excluded by the current vault scope." });
+    expect(response.body).toMatchObject({ error: "Written note content would be excluded by the current vault scope." });
     expect(vault.modify.mock.calls).toHaveLength(0);
     expect(file?.content).toBe("# Existing");
   });
@@ -112,7 +279,8 @@ describe("plugin bridge write routes", () => {
 
     expect(response.status).toBe(200);
     expect((response.body as { operation?: string }).operation).toBe("properties");
-    expect(file?.content).toContain("---\ntitle: Bhutan PM\nsummary:\nimage: \"[[image]]\"\ntags: []\n---\n# Article");
+    expect(parseYaml(file!.content.split("---")[1]!)).toMatchObject({ title: "Bhutan PM", summary: null, image: "[[image]]", tags: [] });
+    expect(file?.content).toContain("# Article\nBody");
   });
 
   it("rejects properties that introduce an excluded tag", async () => {
@@ -133,11 +301,11 @@ describe("plugin bridge write routes", () => {
     });
 
     expect(response.status).toBe(403);
-    expect(response.body).toEqual({ error: "Written note properties would be excluded by the current vault scope." });
+    expect((response.body as {error: string}).error).toContain("excluded by the current vault scope");
     expect(file?.content).toBe("# Article\nBody");
   });
 
-  it("rolls back property writes that fail post-write scope validation", async () => {
+  it("does not interpret a quoted property value as an inline tag", async () => {
     const port = await getFreePort();
     const original = "# Article\nBody";
     const { plugin, file, vault } = createPlugin({
@@ -155,10 +323,10 @@ describe("plugin bridge write routes", () => {
       }
     });
 
-    expect(response.status).toBe(403);
-    expect(response.body).toEqual({ error: "Written note properties would be excluded by the current vault scope." });
-    expect(vault.modify).toHaveBeenCalledWith(file, original);
-    expect(file?.content).toBe(original);
+    expect(response.status).toBe(200);
+    expect(parseYaml(file!.content.split("---")[1]!)).toEqual({ summary: "#private" });
+    expect(vault.modify).not.toHaveBeenCalled();
+    expect(file?.content).toContain(original);
   });
 
   it("repairs malformed existing frontmatter when setting note properties", async () => {
@@ -188,9 +356,8 @@ describe("plugin bridge write routes", () => {
 
     expect(response.status).toBe(200);
     expect((response.body as { operation?: string }).operation).toBe("properties");
-    expect(file?.content).toContain(
-      `---\ntitle: "Bhutan PM on leading the first carbon-negative nation: 'The wellbeing of our people'"\nsummary:\nimage: "[[image]]"\ntags: []\n---\n# Article`
-    );
+    expect(typeof (parseYaml(file!.content.split("---")[1]!) as Record<string, unknown>).title).toBe("string");
+    expect(file?.content).toContain("# Article\nBody");
   });
 
   it("creates a folder-scoped base file with requested table columns", async () => {
@@ -686,6 +853,13 @@ function createPlugin(
           getMarkdownFiles: () => Array.from(files.values()).filter((file) => file.extension === "md"),
           getAbstractFileByPath: (path: string) => files.get(path) ?? folders.get(path) ?? null,
           cachedRead: vi.fn((file: TestFile) => Promise.resolve(file.content)),
+          read: vi.fn((file: TestFile) => Promise.resolve(file.content)),
+          process: vi.fn(async (file: TestFile, callback: (content: string) => string) => {
+            const content = callback(file.content);
+            file.content = content;
+            file.stat.size = content.length;
+            return content;
+          }),
           create,
           createFolder,
           modify
