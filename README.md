@@ -106,6 +106,12 @@ Keep copied configurations private because they contain the token. Token regener
 | Editing rejected | Vault access / returned conflict | Enable editing if intended; on a revision conflict, read the note again before editing. |
 | Setting seems ignored | `index_status.embeddingOverrides` | Remove or update explicit environment overrides, then reload the client. |
 
+## Optional MCP workflow skill
+
+The [MCP Vault Bridge skill](skills/obsidian-vault-bridge/SKILL.md) helps an assistant choose the right search, reading, folder, and note-editing tools, use revisions and retry IDs correctly, and stop once the current request is complete.
+
+The skill lives in `skills/obsidian-vault-bridge/`, separate from the Obsidian plugin. It is optional: MCP provides access and enforces permissions; the skill supplies workflow guidance. Install it in a client that supports Agent Skills, or use a skill loader in LM Studio. See the [skill installation guide](skills/README.md).
+
 ## Reference and development
 
 - [Tools, configuration, and protocol reference](docs/reference.md)
