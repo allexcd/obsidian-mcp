@@ -18,6 +18,22 @@ describe("plugin bridge write routes", () => {
     vi.restoreAllMocks();
   });
 
+  it("rechecks write permission before reserving a retry ID", async () => {
+    const port = await getFreePort();
+    const { plugin, vault } = createPlugin({ port, writeToolsEnabled: false });
+    handles.push(await createBridgeServer(plugin, "token"));
+    const body = { path: "Books", operationId: "same-request" };
+    expect((await postJson(port, "/folders/create", body)).status).toBe(403);
+    plugin.settings.writeToolsEnabled = true;
+    expect((await postJson(port, "/folders/create", body)).body).toMatchObject({ status: "created" });
+    expect(vault.createFolder).toHaveBeenCalledTimes(1);
+    plugin.settings.writeToolsEnabled = false;
+    expect((await postJson(port, "/folders/create", body)).status).toBe(403);
+    plugin.settings.writeToolsEnabled = true;
+    expect((await postJson(port, "/folders/create", body)).body).toMatchObject({ replayed: true });
+    expect(vault.createFolder).toHaveBeenCalledTimes(1);
+  });
+
   it("creates empty folders and handles repeated, nested and concurrent calls without notes", async () => {
     const port = await getFreePort();
     const { plugin, vault, folders } = createPlugin({ port });
@@ -155,7 +171,7 @@ describe("plugin bridge write routes", () => {
     const response = await postJson(port, "/notes/append", { path: "Notes/Test.md", content: "" });
 
     expect(response.status).toBe(403);
-    expect(response.body).toEqual({ error: "Write tools are disabled in the Obsidian plugin settings." });
+    expect(response.body).toEqual({ code: "writes_disabled", error: "Write tools are disabled in the Obsidian plugin settings." });
     expect(audit).toHaveBeenCalledWith({
       route: "/notes/append",
       path: "Notes/Test.md",

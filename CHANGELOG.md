@@ -4,6 +4,8 @@ All notable changes to this project are documented here. Future entries are appe
 
 ## [Unreleased]
 
+- Fix stale write-permission errors on retries after enabling writes; denied requests no longer consume operation IDs.
+
 - Add `create_folder` for empty folders, with exclusion checks, write permissions and safe repeated calls. Reload MCP clients to discover the tool.
 
 - Require explicit `rewrite_note` paths and revisions for `create_note(overwrite=true)` on existing notes. Reload MCP clients to pick up updated schemas.

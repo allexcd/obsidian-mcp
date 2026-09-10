@@ -28,6 +28,11 @@ export class WriteRetries {
       this.entries.set(id, entry);
       // Reserve the ID before execution: even an ambiguous failure must not repeat a write.
       const reply = await execute();
+      // Permission can also change while queued; a denied write never mutated the vault.
+      if (reply.status === 403 && (reply.body as { code?: string })?.code === "writes_disabled") {
+        this.entries.delete(id);
+        return reply;
+      }
       const bytes = Buffer.byteLength(JSON.stringify(reply));
       if (bytes <= this.maxBytes) {
         for (const old of this.entries.values()) {

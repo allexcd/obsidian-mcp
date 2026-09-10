@@ -3,6 +3,14 @@ import { WriteRetries } from "./write-retries.js";
 
 describe("write receipts", () => {
   const allowed = async () => true;
+  it("does not retain a permission denial returned after a request was queued", async () => {
+    const receipts = new WriteRetries();
+    await receipts.run("one", {}, allowed, async () => ({ status: 403, body: { code: "writes_disabled" } }));
+    const write = vi.fn(async () => ({ status: 200, body: { status: "created" } }));
+    expect((await receipts.run("one", {}, allowed, write)).status).toBe(200);
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
   it("serializes concurrent duplicates and treats object key ordering consistently", async () => {
     const receipts = new WriteRetries();
     const write = vi.fn(async () => ({ status: 200, body: { content: "done" } }));

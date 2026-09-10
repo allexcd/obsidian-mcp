@@ -116,6 +116,7 @@ async function handleRequest(
   plugin.syncState ??= new BridgeSyncState();
   const write = writeRoutes[route];
   if (write) {
+    if (!(await ensureWritesEnabled(plugin, response, route, stringField(body.path)))) return;
     let retries = writeRetries.get(plugin);
     if (!retries) { retries = new WriteRetries(); writeRetries.set(plugin, retries); }
     const reply = await retries.run(body.operationId, { route, body }, async previous => {
@@ -652,7 +653,7 @@ async function routeMutateExistingNote(
   const rawPath = stringField(body.path);
   if (!plugin.settings.writeToolsEnabled) {
     await plugin.audit({ route, path: rawPath, allowed: false, reason: "writes_disabled" });
-    sendJson(response, 403, { error: "Write tools are disabled in the Obsidian plugin settings." });
+    sendJson(response, 403, { code: "writes_disabled", error: "Write tools are disabled in the Obsidian plugin settings." });
     return;
   }
 
@@ -711,7 +712,7 @@ async function ensureWritesEnabled(
     return true;
   }
   await plugin.audit({ route, path, allowed: false, reason: "writes_disabled" });
-  sendJson(response, 403, { error: "Write tools are disabled in the Obsidian plugin settings." });
+  sendJson(response, 403, { code: "writes_disabled", error: "Write tools are disabled in the Obsidian plugin settings." });
   return false;
 }
 
