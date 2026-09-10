@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@obsidian-mcp/shared": "0.5.6",
-    "vitest": "4.1.9"
+    "vitest": "4.1.11"
   },
   "devDependencies": {
     "obsidian": "^1.8.7",
