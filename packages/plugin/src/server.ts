@@ -121,6 +121,10 @@ async function handleRequest(
     if (!retries) { retries = new WriteRetries(); writeRetries.set(plugin, retries); }
     const reply = await retries.run(body.operationId, { route, body }, async previous => {
       if (!plugin.settings.writeToolsEnabled) return false;
+      // Errors and evicted receipts contain no successful vault result to authorize.
+      // The retry store already checks the request fingerprint and access-policy revision;
+      // normalizing an invalid request path here would replace its original 4xx with a 500.
+      if (!previous || previous.status >= 400) return true;
       // Recheck both the current file and the historical response before replaying content.
       const saved = previous?.body as { path?: string; note?: VaultNote } | undefined;
       const path = saved?.note?.path ?? saved?.path ?? normalizeVaultPath(stringField(body.path));

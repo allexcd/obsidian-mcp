@@ -4,6 +4,8 @@ All notable changes to this project are documented here. Future entries are appe
 
 ## [Unreleased]
 
+- Preserve original validation errors when retrying invalid writes with an operation ID, instead of failing during replay path authorization.
+
 - Fix stale write-permission errors on retries after enabling writes; denied requests no longer consume operation IDs.
 
 - Add `create_folder` for empty folders, with exclusion checks, write permissions and safe repeated calls. Reload MCP clients to discover the tool.

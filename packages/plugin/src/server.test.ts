@@ -18,6 +18,29 @@ describe("plugin bridge write routes", () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    ["/folders/create", { path: "" }],
+    ["/folders/create", {}],
+    ["/folders/create", { path: "../outside" }],
+    ["/notes/create", { path: "", content: "text" }],
+    ["/notes/append", { path: "", content: "text" }],
+    ["/bases/create", {}]
+  ])("replays invalid write errors for %s without path authorization failures", async (route, input) => {
+    const port = await getFreePort();
+    const { plugin, vault } = createPlugin({ port });
+    handles.push(await createBridgeServer(plugin, "token"));
+    const body = { ...input, operationId: "invalid-write" };
+    const first = await postJson(port, route, body);
+    expect(first.status).toBeGreaterThanOrEqual(400);
+    expect(first.status).toBeLessThan(500);
+    const second = await postJson(port, route, body);
+    expect(second.status).toBe(first.status);
+    expect(second.body).toEqual({ ...(first.body as Record<string, unknown>), replayed: true });
+    expect(vault.create).not.toHaveBeenCalled();
+    expect(vault.createFolder).not.toHaveBeenCalled();
+    expect(vault.modify).not.toHaveBeenCalled();
+  });
+
   it("rechecks write permission before reserving a retry ID", async () => {
     const port = await getFreePort();
     const { plugin, vault } = createPlugin({ port, writeToolsEnabled: false });
